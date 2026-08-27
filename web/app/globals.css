@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens per the Airbnb design language reference
+ * (VoltAgent/awesome-design-md → design-md/airbnb/DESIGN.md).
+ * Extensions beyond that doc are marked; keep them few.
+ */
+@theme {
+  /* Color */
+  --color-rausch: #ff385c;
+  --color-rausch-active: #e00b41;
+  --color-rausch-disabled: #ffd1da;
+  --color-ink: #222222;
+  --color-body: #3f3f3f;
+  --color-muted: #6a6a6a;
+  --color-muted-soft: #929292;
+  --color-hairline: #dddddd;
+  --color-hairline-soft: #ebebeb;
+  --color-border-strong: #c1c1c1;
+  --color-canvas: #ffffff;
+  --color-surface-soft: #f7f7f7;
+  --color-surface-strong: #f2f2f2;
+  --color-error: #c13515;
+  /* Extension: freshness/verification green (the Airbnb doc defines no
+     success color; everything else stays in-system). */
+  --color-success: #008a05;
+
+  /* Type — stack verbatim from the reference doc. */
+  --font-sans:
+    "Airbnb Cereal VF", Circular, -apple-system, system-ui, Roboto,
+    "Helvetica Neue", sans-serif;
+
+  /* Elevation — the single shadow tier. */
+  --shadow-tier:
+    0 0 0 1px rgba(0, 0, 0, 0.02), 0 2px 6px 0 rgba(0, 0, 0, 0.04),
+    0 4px 8px 0 rgba(0, 0, 0, 0.1);
+
+  /* Radius */
+  --radius-card: 14px;
+}
+
+/* No dark mode: the reference system has none for the public web. */
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
