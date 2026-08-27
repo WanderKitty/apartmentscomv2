@@ -76,6 +76,23 @@ describe('postgres SearchService', () => {
     for (const l of r.listings) expect(l.shortTermOk).toBe(false)
   })
 
+  it('applies furnished=false as a hard filter without dropping furnished-NULL rows', async () => {
+    // The seed corpus has no unit with furnished: "furnished" — every row
+    // maps to `furnished: false` in the Listing (row.furnished === true).
+    // furnished:false must therefore match the whole collapsed corpus, and
+    // furnished:true must match nothing (regression: `l.furnished = $3`
+    // is NULL, not TRUE, for unknown-furnished rows, silently dropping them).
+    const falseP: ParsedQuery = { ...parseQueryKeywords(''), furnished: false }
+    const trueP: ParsedQuery = { ...parseQueryKeywords(''), furnished: true }
+    const falseSvc = createSearchService(() => pool, { parse: async () => falseP })
+    const trueSvc = createSearchService(() => pool, { parse: async () => trueP })
+    const falseResult = await falseSvc.search('anything')
+    const trueResult = await trueSvc.search('anything')
+    expect(falseResult.totalCount).toBe(25) // whole collapsed corpus
+    for (const l of falseResult.listings) expect(l.furnished).toBe(false)
+    expect(trueResult.totalCount).toBe(0)
+  })
+
   it('getListing maps the Camellia detail faithfully', async () => {
     const l = await service().getListing('seed___u0001')
     expect(l).not.toBeNull()
@@ -94,6 +111,11 @@ describe('postgres SearchService', () => {
     })
     expect(l!.events).toHaveLength(4)
     expect(l!.provenance).toBe('seed')
+    // Regression: availableDate must come back as the plain calendar date
+    // the DB stored, not shifted by a UTC re-projection of a local-midnight
+    // JS Date. Camellia's seed sets available_on = NOW + 12 days.
+    expect(l!.availableDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(l!.availableDate).toBe('2026-09-08')
     // Seeded 47 days before the frozen NOW, but the service measures from
     // the real clock — assert the floor, not an exact value.
     expect(l!.daysOnMarket).toBeGreaterThanOrEqual(47)

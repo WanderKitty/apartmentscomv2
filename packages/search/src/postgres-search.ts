@@ -26,7 +26,8 @@ FROM (
   SELECT
     l.collapse_key, l.dedup_cluster, l.source_platform, l.source_external_id,
     l.source_url, l.provenance, l.price_cents, l.price_is_starting_at,
-    l.net_effective_rent_cents, l.concessions_text, l.available_on, l.lease_term,
+    l.net_effective_rent_cents, l.concessions_text,
+    to_char(l.available_on, 'YYYY-MM-DD') AS available_on, l.lease_term,
     l.furnished, l.status, l.first_listed_at, l.last_confirmed_at,
     l.price_history, l.events, l.move_in_fees, l.concession, l.description,
     l.trust_score::float8 AS trust_score,
@@ -49,7 +50,7 @@ FROM (
   WHERE l.status = 'active'
     AND ($1::int IS NULL OR l.price_cents IS NULL OR l.price_cents <= $1)
     AND ($2::int IS NULL OR u.beds >= $2)
-    AND ($3::boolean IS NULL OR l.furnished = $3)
+    AND ($3::boolean IS NULL OR (l.furnished IS TRUE) = $3)
     AND ($4::boolean IS NULL OR
          (CASE WHEN $4 THEN l.lease_term IN ('short','both')
                ELSE l.lease_term IN ('long','unknown') END))
@@ -59,14 +60,15 @@ FROM (
           WHERE nh2.name = ANY($6::text[]) AND ST_Covers(nh2.boundary, l.location)))
     AND ($7 = '' OR l.search_tsv @@ plainto_tsquery('english', $7))
 ) q
-ORDER BY (q.price_cents IS NULL) ASC, score_total DESC
+ORDER BY (q.price_cents IS NULL) ASC, score_total DESC, q.source_platform, q.source_external_id
 `
 
 const GET_LISTING_SQL = `
 SELECT
   l.collapse_key, l.dedup_cluster, l.source_platform, l.source_external_id,
   l.source_url, l.provenance, l.price_cents, l.price_is_starting_at,
-  l.net_effective_rent_cents, l.concessions_text, l.available_on, l.lease_term,
+  l.net_effective_rent_cents, l.concessions_text,
+  to_char(l.available_on, 'YYYY-MM-DD') AS available_on, l.lease_term,
   l.furnished, l.status, l.first_listed_at, l.last_confirmed_at,
   l.price_history, l.events, l.move_in_fees, l.concession, l.description,
   l.trust_score::float8 AS trust_score,
@@ -99,7 +101,7 @@ type Row = {
   price_is_starting_at: boolean
   net_effective_rent_cents: number | null
   concessions_text: string | null
-  available_on: Date | null
+  available_on: string | null
   lease_term: 'short' | 'long' | 'both' | 'unknown'
   furnished: boolean | null
   status: 'active' | 'stale' | 'gone'
@@ -159,8 +161,6 @@ function trueCostOf(row: Row): TrueCost | null {
   }
 }
 
-const isoDate = (v: Date | null) => (v ? v.toISOString().slice(0, 10) : null)
-
 function rowToListing(row: Row, now: Date): Listing {
   return {
     id: `${row.source_platform}${SOURCE_ID_SEPARATOR}${row.source_external_id}`,
@@ -175,7 +175,7 @@ function rowToListing(row: Row, now: Date): Listing {
     priceIsStartingAt: row.price_is_starting_at,
     concessionsText: row.concessions_text,
     netEffectiveRent: row.net_effective_rent_cents === null ? null : d(row.net_effective_rent_cents),
-    availableDate: isoDate(row.available_on),
+    availableDate: row.available_on,
     furnished: row.furnished === true,
     shortTermOk: row.lease_term === 'short' || row.lease_term === 'both',
     status: row.status,
