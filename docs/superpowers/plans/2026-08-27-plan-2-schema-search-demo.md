@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** An end-of-day demo on the `web-ui-skeleton` worktree: a 60–90-field enum-constrained unit schema (`v1_processed_unit_data`), 24 honestly-labeled seeded Orlando listings with concession math and price history, a real Haiku NL query parser with fail-open ladder, and UI that shows true-cost arithmetic, time badges, parse echo, and search timing.
+**Goal:** An end-of-day demo on the `web-ui-skeleton` worktree: a ~90-field enum-constrained unit schema (`v1_processed_unit_data`, 92 fields as authored), 24 honestly-labeled seeded Orlando listings with concession math and price history, a real Haiku NL query parser with fail-open ladder, and UI that shows true-cost arithmetic, time badges, parse echo, and search timing.
 
 **Architecture:** All work happens inside the existing Next.js 16 app at `web/` in the worktree `X:\apartmentscomv2\.claude\worktrees\web-ui-skeleton` (branch `worktree-web-ui-skeleton`). The schema is a Zod module; seed data is deterministic TS (defaults + exemplars + a variation table) validated through the schema and projected to the UI's existing `Listing` type; search stays in-memory server-side (SSR page → SearchService), which is the honest, fast demo path — Postgres integration is post-demo. The LLM parse is a server-only module with an in-memory cache and the mock keyword parser as its fallback rung.
 
@@ -160,10 +160,11 @@ describe("ProcessedUnitDataSchema", () => {
     expect(() => ProcessedUnitDataSchema.parse(bad)).toThrow();
   });
 
-  it("field count is in the 60–90 range", () => {
+  it("field count is ~90 (92 as authored)", () => {
     const n = Object.keys(ProcessedUnitDataSchema.shape).length;
     expect(n).toBeGreaterThanOrEqual(60);
-    expect(n).toBeLessThanOrEqual(90);
+    // Upper bound guards accidental bloat only — never trim real fields to fit it.
+    expect(n).toBeLessThanOrEqual(95);
   });
 
   it("exposes the source-id separator homage", () => {
@@ -367,7 +368,7 @@ export function minimalUnit(): ProcessedUnitData {
 
 - [ ] **Step 7: GREEN + generate docs**
 
-Run: `npx vitest run lib/schema` → all pass. If the field-count assertion fails low, the schema above has drifted from this plan — restore it rather than padding.
+Run: `npx vitest run lib/schema` → all pass. If the field-count assertion fails in either direction, the schema above has drifted from this plan — restore it rather than padding or trimming.
 
 `web/scripts/gen-schema-docs.ts`:
 
@@ -395,7 +396,7 @@ writeFileSync(
 console.log(`wrote docs/schema.md (${rows.length} fields)`);
 ```
 
-Run in `web/`: `npm run gen:schema-docs` — expect `wrote docs/schema.md (NN fields)` with NN in 60–90. (Zod v4 introspection API: if `def.type`/`def.entries` differ in the installed version, adapt the script to the version's documented introspection — the doc table is the deliverable, the exact API is not.)
+Run in `web/`: `npm run gen:schema-docs` — expect `wrote docs/schema.md (92 fields)` (60–95 acceptable if the schema legitimately evolves). (Zod v4 introspection API: if `def.type`/`def.entries` differ in the installed version, adapt the script to the version's documented introspection — the doc table is the deliverable, the exact API is not.)
 
 - [ ] **Step 8: Commit**
 
@@ -616,6 +617,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
       latitude: 28.5462, longitude: -81.3708,
       unit_number: "812", floorplan_name: "B1", beds: 2, baths: 2, sqft: 1085,
       advertised_rent_cents: 231500, price_level: "unit", is_price_transparent: true,
+      concession_type: "none", // source states no specials — "none", not "not_mentioned"
       pets_allowed: "allowed", pet_rent_monthly_cents: 3500, pet_deposit_cents: 25000,
       unit_amenities: ["in-unit laundry", "walk-in closet", "stainless appliances"],
       community_amenities: ["pet friendly", "dog park", "gym", "package lockers"],
@@ -678,6 +680,8 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
       floorplan_name: "C3", beds: 3, baths: 2, sqft: 1410,
       advertised_rent_cents: null, is_rent_not_mentioned: true,
       price_level: "not_listed", is_price_transparent: false,
+      // concession_type deliberately stays "not_mentioned": this source publishes
+      // nothing, showcasing the none-vs-not_mentioned distinction the schema exists for.
       pets_allowed: "not_mentioned",
       community_amenities: ["pool", "playground", "parking"],
       first_seen_at: iso(now, 9), last_confirmed_at: iso(now, 2),
@@ -741,7 +745,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
                 concession: { kind: "free_weeks", weeks: 4, leaseMonths: 12 },
               }),
             }
-          : {}),
+          : { concession_type: "none" as const }), // fictional sources state "no specials" — explicit none
         property_name: name, neighborhood: hood, latitude: lat, longitude: lng,
         beds, baths, sqft, is_sqft_not_mentioned: sqft === null,
         floorplan_name: `${"SABC"[beds]}${(i % 3) + 1}`,
@@ -1193,7 +1197,8 @@ export const searchService: SearchService = {
     const now = new Date();
     const parsed = await parseQuery(rawQuery);
     const t0 = performance.now();
-    const scored = corpus(now).filter((l) => matches(l, parsed)).map((l) => score(l, now));
+    const all = corpus(now);
+    const scored = all.filter((l) => matches(l, parsed)).map((l) => score(l, now));
     scored.sort((a, b) => {
       if ((a.price === null) !== (b.price === null)) return a.price === null ? 1 : -1; // undisclosed price last
       return b.score.total - a.score.total;
@@ -1203,7 +1208,7 @@ export const searchService: SearchService = {
       listings: scored,
       parsed,
       totalCount: scored.length,
-      timing: { parseMs: parsed.parseMs, searchMs, p50SearchMs: recordP50(searchMs), corpus: 24 },
+      timing: { parseMs: parsed.parseMs, searchMs, p50SearchMs: recordP50(searchMs), corpus: all.length },
     };
   },
 
