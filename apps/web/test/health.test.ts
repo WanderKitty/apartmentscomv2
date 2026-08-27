@@ -1,6 +1,10 @@
+// @vitest-environment node
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { config } from 'dotenv'
+import { fileURLToPath } from 'node:url'
 
 beforeAll(() => {
+  config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) })
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL
 })
 afterAll(async () => {

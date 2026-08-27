@@ -1,0 +1,18 @@
+{
+  "name": "@aptv2/schema",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "gen:schema-docs": "tsx scripts/gen-schema-docs.ts"
+  },
+  "dependencies": { "zod": "^4.4.3" },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0",
+    "tsx": "^4.19.0"
+  }
+}
