@@ -1,0 +1,13 @@
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: aptv2
+    volumes:
+      - ./docker/initdb:/docker-entrypoint-initdb.d
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
