@@ -66,6 +66,8 @@ export function parseQueryMock(raw: string): ParsedQuery {
     // Fail-open ladder (§6.1): nothing recognized → raw text runs as FTS.
     residualText: recognizedAnything ? "" : raw.trim(),
     failedOpen: !recognizedAnything && raw.trim().length > 0,
+    parseSource: "fallback" as const,
+    parseMs: 0,
   };
 }
 
