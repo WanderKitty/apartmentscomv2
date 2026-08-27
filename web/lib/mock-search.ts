@@ -116,7 +116,12 @@ export class MockSearchService implements SearchService {
       return b.score.total - a.score.total;
     });
 
-    return { listings: hits, parsed, totalCount: hits.length };
+    return {
+      listings: hits,
+      parsed,
+      totalCount: hits.length,
+      timing: { parseMs: 0, searchMs: 0, p50SearchMs: 0, corpus: all.length },
+    };
   }
 
   async getListing(id: string): Promise<Listing | null> {

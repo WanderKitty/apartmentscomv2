@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FreshnessBadge } from "@/components/FreshnessBadge";
-import { searchService } from "@/lib/mock-search";
+import { searchService } from "@/lib/search";
 import {
   formatBedsBaths,
   formatPrice,
