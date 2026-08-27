@@ -37,10 +37,20 @@
 - Consumes: `getPool`, `closePool` from `@aptv2/db` (existing: `getPool(): pg.Pool` reading `process.env.DATABASE_URL`; `closePool(): Promise<void>`).
 - Produces: the demo app living at `apps/web` as workspace member `@aptv2/web`, with `GET /api/health` working. All later tasks edit the app at this path.
 
-- [ ] **Step 1: Branches**
+- [ ] **Step 0: Verify the Plan-2 merge landed on master**
+
+This plan assumes Plan 2's `worktree-web-ui-skeleton` branch was merged into master (done 2026-08-27 as `a63df7b`), which is what put the demo app at `web/` in the main checkout. Verify before anything else:
 
 ```bash
 cd X:/apartmentscomv2
+test -f web/lib/seed.ts && git branch --merged master | grep worktree-web-ui-skeleton
+```
+
+Expected: the file exists and the branch prints. If either check fails, **STOP and report to the controller** — do not perform the merge inside this task; nothing else in this plan can run until the controller resolves it.
+
+- [ ] **Step 1: Branches**
+
+```bash
 git checkout master
 git checkout -b plan3-integration
 git checkout -b task/p3-1-consolidate-web
@@ -363,7 +373,7 @@ git mv apps/web/docs/schema.md packages/schema/docs/schema.md
 
 - [ ] **Step 4: Create the shared types and taxonomy modules**
 
-`packages/schema/src/types.ts` — move the domain types out of `apps/web/lib/types.ts` verbatim, with ONE rename to avoid clashing with the schema's snake_case `ListingEvent`: the UI event type is exported as `UiListingEvent`. Copy from `apps/web/lib/types.ts` the interfaces `PriceChange`, `ScoreComponents`, `TrueCost`, `ListingEvent` (rename to `UiListingEvent`), `Listing`, `ParsedQuery`, `SearchResult`, `SearchService` and the type `ListingStatus`, keeping every field and comment identical. In the copied `Listing`, the `events` field becomes `events: UiListingEvent[];`. Do NOT copy `SourceHealth` (it stays web-local).
+`packages/schema/src/types.ts` — move the domain types out of `apps/web/lib/types.ts` verbatim, with ONE rename to avoid clashing with the schema's snake_case `ListingEvent`: the UI event type is exported as `UiListingEvent`. (Confirmed: `Listing` already carries `alsoListedOn` and `dedupCluster: string` — `apps/web/lib/types.ts:71-74` — so the verbatim copy brings along everything Task 5's `rowToListing` assigns; if the copy somehow surfaces a missing field, add it HERE, not in Task 5.) Copy from `apps/web/lib/types.ts` the interfaces `PriceChange`, `ScoreComponents`, `TrueCost`, `ListingEvent` (rename to `UiListingEvent`), `Listing`, `ParsedQuery`, `SearchResult`, `SearchService` and the type `ListingStatus`, keeping every field and comment identical. In the copied `Listing`, the `events` field becomes `events: UiListingEvent[];`. Do NOT copy `SourceHealth` (it stays web-local).
 
 `packages/schema/src/taxonomy.ts` — move `NEIGHBORHOOD_ALIASES` and `AMENITY_KEYWORDS` verbatim from `apps/web/lib/fixtures.ts`:
 
@@ -662,9 +672,14 @@ import type pg from 'pg'
 import { GEO, NEIGHBORHOOD_ALIASES } from '@aptv2/schema'
 
 // Seed-approximate neighborhood boundaries: a bbox around each demo
-// centroid. Half-width 0.005° (~550m) keeps the eight demo hoods
-// mutually disjoint (closest centroid pair is ~700m apart). Replaced by
-// real polygons (Orlando open data / OSM) post-demo.
+// centroid, half-width 0.005° (~550m). Adjacent boxes DO overlap
+// (Lake Eola / Downtown / Thornton centroids are ~0.006–0.007° apart,
+// less than the 0.010° two boxes need to stay disjoint) — that is fine:
+// the search filters are EXISTS-any and MIN-distance, and what the seed
+// corpus relies on is only that each box contains no OTHER hood's
+// listings, which holds because every foreign centroid is >0.005° away
+// on at least one axis. Replaced by real polygons (Orlando open data /
+// OSM) post-demo.
 const HALF = 0.005
 
 export async function seedNeighborhoods(pool: pg.Pool): Promise<number> {
@@ -1546,7 +1561,7 @@ Delete `apps/web/lib/mock-search.ts` and `apps/web/lib/search.test.ts` (`git rm`
 `apps/web/package.json`: add `"@aptv2/search": "workspace:*"`; now remove `"zod"` and `"@anthropic-ai/sdk"` from dependencies if no remaining app file imports them (`grep -rn "from \"zod\"\|@anthropic-ai/sdk" apps/web/app apps/web/components apps/web/lib` → expect no hits after the moves).
 `apps/web/next.config.ts`: `transpilePackages: ["@aptv2/db", "@aptv2/schema", "@aptv2/search"]`.
 
-Pages need no edits: `app/page.tsx` and `app/listing/[id]/page.tsx` already consume `searchService` and `result.timing`. The listing-id format (`seed___u0001`) is unchanged.
+One page copy edit: the results timing line at `apps/web/app/page.tsx:93` says `{timing.corpus} listings (in-memory)` — that label becomes a lie once results come from Postgres. Change `(in-memory)` to `(Postgres)` and run `grep -rn "in-memory" apps/web/app apps/web/components` to confirm no other stale copy remains (code comments in `packages/` describing the collapse strategy are fine). Otherwise pages need no edits: `app/page.tsx` and `app/listing/[id]/page.tsx` already consume `searchService` and `result.timing`, and the listing-id format (`seed___u0001`) is unchanged.
 
 - [ ] **Step 8: GREEN end-to-end**
 
