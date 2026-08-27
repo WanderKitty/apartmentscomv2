@@ -19,6 +19,22 @@ export interface ScoreComponents {
   total: number;
 }
 
+export interface TrueCost {
+  advertisedMonthly: number;           // dollars
+  concessionLabel: string;             // e.g. "6 wk free ÷ 13 mo"
+  concessionMonthly: number;           // dollars saved per month (positive)
+  netEffectiveMonthly: number;         // dollars
+  moveInFees: Array<{ label: string; amount: number }>; // one-time, dollars
+}
+
+export interface ListingEvent {
+  at: string; // ISO datetime
+  kind: "first_listed" | "price_drop" | "price_increase" | "concession_added" | "concession_removed" | "confirmed";
+  fromCents: number | null;
+  toCents: number | null;
+  note: string | null;
+}
+
 export interface Listing {
   id: string;
   propertyId: string;
@@ -48,6 +64,14 @@ export interface Listing {
   amenities: string[];
   description: string | null;
   score: ScoreComponents;
+  events: ListingEvent[];
+  trueCost: TrueCost | null;
+  provenance: "seed" | "scraped";
+  daysOnMarket: number;
+  /** Other sources advertising the same physical unit (dedup collapse). */
+  alsoListedOn: Array<{ platform: string; price: number | null }>;
+  /** liberal_dedup_cluster carried through for the search-layer collapse. */
+  dedupCluster: string;
 }
 
 /** Output of the query-parse step (§6.1). */
