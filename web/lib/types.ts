@@ -85,6 +85,10 @@ export interface ParsedQuery {
   residualText: string;
   /** True when the parse fail-open ladder kicked in (raw text as FTS). */
   failedOpen: boolean;
+  /** Which rung produced this parse. */
+  parseSource: "llm" | "cache" | "fallback";
+  /** Wall-clock ms spent parsing (0 on cache hits). */
+  parseMs: number;
 }
 
 export interface SearchResult {
