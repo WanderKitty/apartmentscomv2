@@ -55,6 +55,23 @@ const GEO: Record<string, [number, number]> = {
   SoDo: [28.5203, -81.3781], "Audubon Park": [28.5738, -81.3435],
 };
 
+/** One fictional street per neighborhood, for the V-table's derived addresses. */
+const STREETS: Record<string, string> = {
+  "Lake Eola Heights": "E Robinson St", "Thornton Park": "S Summerlin Ave",
+  "Downtown Orlando": "N Orange Ave", "Mills 50": "N Mills Ave",
+  "College Park": "Edgewater Dr", "Baldwin Park": "Lake Baldwin Ln",
+  SoDo: "S Orange Ave", "Audubon Park": "Corrine Dr",
+};
+
+/** Plausible per-neighborhood Orlando zip codes. */
+const ZIPS: Record<string, string> = {
+  "Lake Eola Heights": "32801", "Thornton Park": "32801", "Downtown Orlando": "32801",
+  "Mills 50": "32803", "Audubon Park": "32803",
+  "College Park": "32804",
+  SoDo: "32806",
+  "Baldwin Park": "32814",
+};
+
 export function buildSeedUnits(now: Date): ProcessedUnitData[] {
   const units: ProcessedUnitData[] = [];
 
@@ -70,6 +87,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
         year_built: 2019, is_year_built_not_mentioned: false,
         property_unit_count: 212, is_property_unit_count_not_mentioned: false,
         neighborhood: "Lake Eola Heights",
+        address_line1: "521 E Central Blvd", zip: "32801",
         latitude: GEO["Lake Eola Heights"][0], longitude: GEO["Lake Eola Heights"][1],
         unit_number: "304", floorplan_name: "A2", beds: 1, baths: 1, sqft: 742,
         floor_level: 3, is_floor_level_not_mentioned: false,
@@ -112,6 +130,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
     seedUnit(2, {
       property_name: "Eola Commons",
       neighborhood: "Lake Eola Heights",
+      address_line1: "233 N Eola Dr", zip: "32801",
       latitude: 28.5462, longitude: -81.3708,
       unit_number: "812", floorplan_name: "B1", beds: 2, baths: 2, sqft: 1085,
       advertised_rent_cents: 231500, price_level: "unit", is_price_transparent: true,
@@ -139,6 +158,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
       seedUnit(3, {
         property_name: "The Foundry SoDo",
         neighborhood: "SoDo",
+        address_line1: "88 W Grant St", zip: "32806",
         latitude: GEO.SoDo[0], longitude: GEO.SoDo[1],
         unit_number: null, floorplan_name: "S1 Studio", beds: 0, baths: 1, sqft: 528,
         advertised_rent_cents: advertised, price_level: "floorplan_starting_at",
@@ -174,6 +194,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
     seedUnit(4, {
       property_name: "Baldwin Harbor Flats",
       neighborhood: "Baldwin Park",
+      address_line1: "4650 New Broad St", zip: "32814",
       latitude: GEO["Baldwin Park"][0], longitude: GEO["Baldwin Park"][1],
       floorplan_name: "C3", beds: 3, baths: 2, sqft: 1410,
       advertised_rent_cents: null, is_rent_not_mentioned: true,
@@ -257,6 +278,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
       seedUnit(n, {
         ...(concession ?? { concession_type: "none" as const }), // A4: explicit none where truly none
         property_name: name, neighborhood: hood, latitude: lat, longitude: lng,
+        address_line1: `${120 + i * 31} ${STREETS[hood]}`, zip: ZIPS[hood],
         beds, baths, sqft, is_sqft_not_mentioned: sqft === null,
         floorplan_name: `${"SABC"[beds]}${(i % 3) + 1}`,
         advertised_rent_cents: rent, price_level: "unit", is_price_transparent: true,
