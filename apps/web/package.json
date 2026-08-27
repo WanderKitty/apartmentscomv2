@@ -11,14 +11,13 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.121.0",
     "@aptv2/db": "workspace:*",
     "@aptv2/schema": "workspace:*",
+    "@aptv2/search": "workspace:*",
     "next": "16.3.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "server-only": "^0.0.1",
-    "zod": "^4.4.3"
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

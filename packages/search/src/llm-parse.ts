@@ -1,10 +1,8 @@
-import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { AMENITY_KEYWORDS, NEIGHBORHOOD_ALIASES } from "../fixtures";
-import { parseQueryMock } from "../mock-search";
-import type { ParsedQuery } from "../types";
+import { AMENITY_KEYWORDS, NEIGHBORHOOD_ALIASES, type ParsedQuery } from "@aptv2/schema";
+import { parseQueryKeywords } from "./keyword-parse";
 
 const NEIGHBORHOODS = Object.keys(NEIGHBORHOOD_ALIASES) as [string, ...string[]];
 const AMENITIES = Object.keys(AMENITY_KEYWORDS) as [string, ...string[]];
@@ -54,7 +52,7 @@ export async function parseQueryWith(
   const hit = cache.get(key);
   if (hit) return { ...hit, parseSource: "cache", parseMs: 0 };
 
-  const fallback = (): ParsedQuery => parseQueryMock(raw);
+  const fallback = (): ParsedQuery => parseQueryKeywords(raw);
   if (!client) return fallback();
 
   const started = performance.now();
