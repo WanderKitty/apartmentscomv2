@@ -1,7 +1,8 @@
 # web — apartment search demo (spec §3.1 module 5)
 
 A schema-first pitch, made concrete: extraction depth at ingest (a 93-field
-`v1_processed_unit_data` record per listing, `docs/schema.md`), and a
+`v1_processed_unit_data` record per listing,
+`../../packages/schema/docs/schema.md`), and a
 natural-language parse at the front door (`?q=` on `/`). 26 seeded Orlando
 listings run end to end through both — no backend required.
 
@@ -11,9 +12,9 @@ listings run end to end through both — no backend required.
   `v1_processed_unit_data` shape: rent normalized to every frequency,
   concessions amortized into a true monthly cost, `is_X_not_mentioned`
   companions so "absent" is never silently read as "zero", cross-source
-  dedup, and a full price-history event log. See `docs/schema.md`
-  (generated — do not edit by hand) and `docs/lineage.md` for where the
-  discipline came from.
+  dedup, and a full price-history event log. See
+  `../../packages/schema/docs/schema.md` (generated — do not edit by hand)
+  and `docs/lineage.md` for where the discipline came from.
 - **NL parse at the front door.** Type a query like `pet friendly 2br under
   $2400 near Lake Eola with in-unit laundry` and the parse echo shows
   exactly what was understood — neighborhood, price ceiling, bed count,
@@ -28,8 +29,11 @@ listings run end to end through both — no backend required.
 ## How to run it
 
 ```bash
-npm install
-npm run dev
+docker compose up -d                      # Postgres + PostGIS (repo root)
+pnpm install
+pnpm --filter @aptv2/db migrate
+pnpm --filter @aptv2/pipeline seed        # 26 seeded Orlando listings → Postgres
+pnpm --filter @aptv2/web dev
 ```
 
 Then open `http://localhost:3000` and search, or open
@@ -53,16 +57,19 @@ for lack of a key.
 
 ## The seam to the real backend
 
-Pages talk only to the `SearchService` interface in `lib/types.ts`.
-`lib/search.ts` + `lib/seed.ts` implement it today against the 26-listing
-seed corpus (`lib/fixtures.ts`, invented Orlando data) so the UI runs with
-no backend. Swapping `searchService` for a real backend implementation of
-the same interface is the whole integration.
+Pages still talk only to the `SearchService` interface in `lib/types.ts`
+(`@aptv2/schema` types) — that seam is now filled. `lib/search.ts` wires it
+to `@aptv2/search`'s Postgres implementation: one SQL query over
+`properties`/`units`/`listings` that applies filters, PostGIS proximity, and
+full-text search, then blends them per spec §6.3. The corpus is loaded by
+`@aptv2/pipeline`'s upsert seam (`upsertProcessedUnits`) — the same function
+Plan 4's scrape pipeline will call. The in-memory implementation is gone.
 
 ## Schema
 
-`docs/schema.md` is generated from `lib/schema/processed-unit-data.ts` via
-`npm run gen:schema-docs` — do not edit it by hand.
+`docs/schema.md` (generated — do not edit by hand) now lives at
+`../../packages/schema/docs/schema.md`, generated from the schema module in
+`@aptv2/schema` via `pnpm --filter @aptv2/schema gen:schema-docs`.
 
 **Schema lineage:** see `docs/lineage.md` for where each field pattern
 came from.
@@ -86,8 +93,8 @@ real renter interactions post-demo.
 ## Commands
 
 ```bash
-npm run dev              # dev server
-npm test                 # vitest (npx vitest run)
-npm run build            # production build
-npm run gen:schema-docs  # regenerate docs/schema.md from the schema module
+pnpm --filter @aptv2/web dev              # dev server
+pnpm --filter @aptv2/web test             # vitest (vitest run)
+pnpm --filter @aptv2/web build            # production build
+pnpm --filter @aptv2/schema gen:schema-docs  # regenerate packages/schema/docs/schema.md
 ```
