@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { z } from "zod";
-import { ProcessedUnitDataSchema } from "../lib/schema/processed-unit-data";
+import { ProcessedUnitDataSchema } from "../src/processed-unit-data";
 
 const rows = Object.entries(ProcessedUnitDataSchema.shape).map(([name, s]) => {
   let t: any = s;

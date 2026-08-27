@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 config({ path: fileURLToPath(new URL("../../.env", import.meta.url)) });
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@aptv2/db"],
+  transpilePackages: ["@aptv2/db", "@aptv2/schema"],
 };
 
 export default nextConfig;
