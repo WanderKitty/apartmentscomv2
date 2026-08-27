@@ -3,3 +3,6 @@ packages:
   - "packages/*"
 allowBuilds:
   esbuild: true
+  unrs-resolver: false
+minimumReleaseAgeExclude:
+  - '@testing-library/react@16.3.3'
