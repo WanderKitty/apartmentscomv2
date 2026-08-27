@@ -136,6 +136,9 @@ importers:
       '@aptv2/schema':
         specifier: workspace:*
         version: link:../schema
+      '@aptv2/scrapers':
+        specifier: workspace:*
+        version: link:../scrapers
       pg:
         specifier: ^8.13.0
         version: 8.23.0

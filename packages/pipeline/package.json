@@ -6,11 +6,13 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "seed": "tsx src/seed-cli.ts"
+    "seed": "tsx src/seed-cli.ts",
+    "seed:sources": "tsx src/seed-sources-cli.ts"
   },
   "dependencies": {
     "@aptv2/db": "workspace:*",
     "@aptv2/schema": "workspace:*",
+    "@aptv2/scrapers": "workspace:*",
     "pg": "^8.13.0"
   },
   "devDependencies": {
