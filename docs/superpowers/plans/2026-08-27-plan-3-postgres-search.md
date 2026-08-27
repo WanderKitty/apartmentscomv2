@@ -923,6 +923,11 @@ git checkout plan3-integration && git merge --no-ff task/p3-4-pipeline
 
 ### Task 5: `@aptv2/search` — SQL SearchService, parse modules move, web wiring
 
+> **Execution amendments (2026-08-27, controller rulings on review findings — the shipped code follows these, superseding the verbatim blocks below):**
+> 1. SEARCH_SQL's furnished filter is `AND ($3::boolean IS NULL OR (l.furnished IS TRUE) = $3)` — the plan's `l.furnished = $3` silently dropped furnished-NULL rows from `furnished: false` queries (`NULL = false` is NULL) while the mapper presents them as not-furnished. Covering tests added (furnished:false → all 25 collapsed seed listings; furnished:true → 0).
+> 2. Both SQL statements select `to_char(l.available_on, 'YYYY-MM-DD') AS available_on` (Row type `string | null`, mapper passes through; `isoDate` helper removed) — node-pg parses `date` at local midnight, so the plan's `toISOString().slice(0,10)` was off by one day on UTC+ machines.
+> 3. SEARCH_SQL's outer ORDER BY gains a deterministic tiebreaker: `ORDER BY (q.price_cents IS NULL) ASC, score_total DESC, q.source_platform, q.source_external_id`.
+
 **Files:**
 - Create: `packages/search/package.json`, `packages/search/tsconfig.json`, `packages/search/vitest.config.ts`, `packages/search/src/index.ts`, `packages/search/src/keyword-parse.ts`, `packages/search/src/postgres-search.ts`
 - Move (git mv): `apps/web/lib/parse/llm-parse.ts` → `packages/search/src/llm-parse.ts`; `apps/web/lib/parse/llm-parse.test.ts` → `packages/search/src/llm-parse.test.ts`
