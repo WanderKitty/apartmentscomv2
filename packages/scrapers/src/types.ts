@@ -8,7 +8,7 @@ export type SourceRow = {
   name: string
   website_url: string
   endpoint_config: {
-    /** The JSON endpoint this site's own frontend uses, found at scouting. */
+    /** The availability endpoint this site's own frontend uses — a JSON API route, or the public page embedding the availability JSON. */
     endpoint_url: string
     /** Property facts recorded at scouting (payloads rarely carry full address/geo). */
     property: {
