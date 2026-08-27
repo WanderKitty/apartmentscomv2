@@ -1,4 +1,4 @@
-import type { Listing, ListingEvent as UiEvent, TrueCost } from "./types";
+import type { Listing, TrueCost } from "./types";
 import {
   ProcessedUnitDataSchema,
   SOURCE_ID_SEPARATOR,
@@ -344,7 +344,10 @@ function trueCostOf(u: ProcessedUnitData): TrueCost | null {
 
 export function toListing(u: ProcessedUnitData, now: Date): Listing {
   return {
-    id: u.source_id.split(SOURCE_ID_SEPARATOR)[1] ?? u.source_id,
+    // Full source_id (e.g. "seed___u0001", "appfolio___ridgewood-402") —
+    // globally unique across platforms, unlike the bare external id, which
+    // the Ridgewood duplicate pair shares.
+    id: u.source_id,
     propertyId: u.collapse_key,
     propertyName: u.property_name,
     neighborhood: u.neighborhood,

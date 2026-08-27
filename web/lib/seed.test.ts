@@ -52,6 +52,11 @@ describe("seed data", () => {
     expect(l.events.length).toBeGreaterThanOrEqual(3);
   });
 
+  it("projects every unit to a globally unique Listing id", () => {
+    const ids = units.map((u) => toListing(u, NOW).id);
+    expect(new Set(ids).size).toBe(units.length);
+  });
+
   it("frequency normalization is consistent", () => {
     for (const u of units) {
       if (u.rent_monthly_cents !== null) {
