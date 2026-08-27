@@ -13,7 +13,7 @@ afterAll(async () => {
 })
 
 describe('sources seed', () => {
-  it('has 1-5 rentcafe sources with complete endpoint_config', () => {
+  it('has 1-5 entrata sources with complete endpoint_config', () => {
     expect(SOURCES_SEED.length).toBeGreaterThanOrEqual(1)
     expect(SOURCES_SEED.length).toBeLessThanOrEqual(5)
     for (const s of SOURCES_SEED) {
