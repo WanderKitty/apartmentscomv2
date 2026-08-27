@@ -1,7 +1,7 @@
 // Domain types for the web module, mirroring the data model in
 // docs/superpowers/specs/2026-08-27-apartment-aggregator-design.md §4.
-// The web module reads listings ONLY through SearchService (§3.1) —
-// swap MockSearchService for the real `search` module implementation.
+// The web module reads listings ONLY through SearchService (§3.1); the
+// Postgres-backed implementation lives in @aptv2/search.
 
 export type ListingStatus = "active" | "stale" | "gone";
 

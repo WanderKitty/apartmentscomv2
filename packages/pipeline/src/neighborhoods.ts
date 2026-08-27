@@ -4,12 +4,18 @@ import { GEO, NEIGHBORHOOD_ALIASES } from '@aptv2/schema'
 // Seed-approximate neighborhood boundaries: a bbox around each demo
 // centroid, half-width 0.005° (~550m). Adjacent boxes DO overlap
 // (Lake Eola / Downtown / Thornton centroids are ~0.006–0.007° apart,
-// less than the 0.010° two boxes need to stay disjoint) — that is fine:
-// the search filters are EXISTS-any and MIN-distance, and what the seed
-// corpus relies on is only that each box contains no OTHER hood's
-// listings, which holds because every foreign centroid is >0.005° away
-// on at least one axis. Replaced by real polygons (Orlando open data /
-// OSM) post-demo.
+// less than the 0.010° two boxes need to stay disjoint), and boxes are
+// NOT guaranteed to contain only their own hood's listings — two known
+// seed listings sit in a neighboring hood's box as well as their own:
+// Ridgewood House (28.545, -81.376, labeled Lake Eola Heights) also
+// falls inside the Downtown Orlando box, and Eola Commons (28.5462,
+// -81.3708, labeled Lake Eola Heights) also falls inside the Thornton
+// Park box. This is acceptable for the placeholder geo because the
+// search filters are EXISTS-any (a listing matching ANY requested
+// neighborhood box passes) and MIN-distance (proximity scoring), not an
+// exclusive assignment — a listing counted under an extra box never
+// produces a wrong exclusive answer. Replaced by real polygons (Orlando
+// open data / OSM) post-demo.
 const HALF = 0.005
 
 export async function seedNeighborhoods(pool: pg.Pool): Promise<number> {

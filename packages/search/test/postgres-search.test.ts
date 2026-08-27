@@ -133,4 +133,16 @@ describe('postgres SearchService', () => {
     expect(rows[0].parse_source).toBe('fallback')
     expect(rows[0].result_count).toBeGreaterThanOrEqual(1)
   })
+
+  it('falls open to FTS for unrecognized terms and ranks by text relevance', async () => {
+    const r = await service().search('rooftop coworking')
+    expect(r.parsed.failedOpen).toBe(true)
+    expect(r.parsed.residualText).toBe('rooftop coworking')
+    // plainto_tsquery ANDs terms: all three Vue Downtown units have
+    // "rooftop" in community amenities, but only the 1br and 2br also have
+    // "coworking" — the studio doesn't, so it's excluded. 2 is correct, not 3.
+    expect(r.totalCount).toBe(2)
+    for (const l of r.listings) expect(l.propertyName).toBe('The Vue Downtown')
+    expect(r.listings[0]!.score.textRelevance).toBeGreaterThan(0)
+  })
 })

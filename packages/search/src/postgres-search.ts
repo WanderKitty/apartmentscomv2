@@ -24,7 +24,12 @@ SELECT q.*,
        (0.35 * q.text_rel + 0.30 * q.freshness + 0.25 * q.trust_score + 0.10 * q.proximity) AS score_total
 FROM (
   SELECT
-    l.collapse_key, l.dedup_cluster, l.source_platform, l.source_external_id,
+    l.collapse_key,
+    -- dedup_cluster is nullable; a writer that omits it must not collapse
+    -- every null-cluster row into a single card, so fall back to the
+    -- (unique per row) collapse_key as the grouping key.
+    COALESCE(l.dedup_cluster, l.collapse_key) AS dedup_cluster,
+    l.source_platform, l.source_external_id,
     l.source_url, l.provenance, l.price_cents, l.price_is_starting_at,
     l.net_effective_rent_cents, l.concessions_text,
     to_char(l.available_on, 'YYYY-MM-DD') AS available_on, l.lease_term,
@@ -65,7 +70,12 @@ ORDER BY (q.price_cents IS NULL) ASC, score_total DESC, q.source_platform, q.sou
 
 const GET_LISTING_SQL = `
 SELECT
-  l.collapse_key, l.dedup_cluster, l.source_platform, l.source_external_id,
+  l.collapse_key,
+  -- dedup_cluster is nullable; a writer that omits it must not collapse
+  -- every null-cluster row into a single card, so fall back to the
+  -- (unique per row) collapse_key as the grouping key.
+  COALESCE(l.dedup_cluster, l.collapse_key) AS dedup_cluster,
+  l.source_platform, l.source_external_id,
   l.source_url, l.provenance, l.price_cents, l.price_is_starting_at,
   l.net_effective_rent_cents, l.concessions_text,
   to_char(l.available_on, 'YYYY-MM-DD') AS available_on, l.lease_term,
