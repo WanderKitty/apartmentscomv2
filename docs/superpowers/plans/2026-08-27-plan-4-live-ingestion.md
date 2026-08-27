@@ -1477,6 +1477,10 @@ Wire in `apps/worker/src/index.ts`: after the existing heartbeat registration, `
 
 Run: `pnpm --filter @aptv2/worker test` → green; whole repo green.
 
+- [ ] **Step 3b: scrape-all CLI (deployment amendment, 2026-08-27)**
+
+`apps/worker/src/scrape-all.ts` — the entry point a hosted cron (GitHub Actions, Plan 5) invokes instead of the long-lived pg-boss process: dotenv root `.env`; load all enabled sources ordered by id; for each, `runScrape` with the real politeness fetcher then (when a new snapshot was produced) `runProcess` with `createHaikuEnricher()`, sequentially, continuing to the next source when one fails (the failure is already recorded in `scrape_runs`/`failure_streak` — log it and move on); print a per-source summary line and exit nonzero if EVERY source failed, zero otherwise. Add script `"scrape:all": "tsx src/scrape-all.ts"`. No test beyond typecheck — it is composition of already-tested functions; DO NOT run it in this task (network discipline: Task 7's DoD is the only sanctioned live run alongside `smoke`).
+
 - [ ] **Step 4: Smoke command (the ONLY networked path besides the scheduler)**
 
 `apps/worker/src/smoke.ts`: dotenv root `.env`; args: `--source <id>`; loads the source, runs `runScrape` with the real politeness fetcher, then `runProcess` with `createHaikuEnricher()`; prints: robots decision, snapshot id + hash, unchanged?, units upserted, failures, and the top-3 resulting listings (name/beds/price) from a quick query. Exits nonzero on error. Add script `"smoke": "tsx src/smoke.ts"`. DO NOT run it in this task — Task 6's DoD runs it once, deliberately.
