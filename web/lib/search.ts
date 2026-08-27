@@ -8,12 +8,12 @@ function corpus(now: Date): Listing[] {
   return buildSeedUnits(now).map((u) => toListing(u, now));
 }
 
-function matches(l: Listing, p: ParsedQuery): boolean {
+export function matches(l: Listing, p: ParsedQuery): boolean {
   if (p.neighborhoods.length > 0 && !p.neighborhoods.includes(l.neighborhood)) return false;
   if (p.priceMax !== null && l.price !== null && l.price > p.priceMax) return false; // null price passes — badged, ranked last
   if (p.bedsMin !== null && l.beds < p.bedsMin) return false;
   if (p.furnished !== null && l.furnished !== p.furnished) return false;
-  if (p.shortTerm === true && !l.shortTermOk) return false;
+  if (p.shortTerm !== null && l.shortTermOk !== p.shortTerm) return false;
   for (const a of p.amenities) if (!l.amenities.includes(a)) return false;
   if (p.residualText) {
     const hay = `${l.propertyName} ${l.neighborhood} ${l.description ?? ""}`.toLowerCase();

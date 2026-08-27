@@ -2,11 +2,26 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("./parse/llm-parse", async () => {
   const { parseQueryMock } = await import("./mock-search");
-  return { parseQuery: async (raw: string) => parseQueryMock(raw) };
+  return { parseQuery: vi.fn(async (raw: string) => parseQueryMock(raw)) };
 });
 
-import { searchService } from "./search";
-import { buildSeedUnits } from "./seed";
+import { searchService, matches } from "./search";
+import { buildSeedUnits, toListing } from "./seed";
+import { parseQuery } from "./parse/llm-parse";
+import type { ParsedQuery } from "./types";
+
+const NO_FILTERS: ParsedQuery = {
+  neighborhoods: [],
+  priceMax: null,
+  bedsMin: null,
+  furnished: null,
+  shortTerm: null,
+  amenities: [],
+  residualText: "",
+  failedOpen: false,
+  parseSource: "fallback",
+  parseMs: 0,
+};
 
 describe("searchService", () => {
   it("the demo query returns only matching listings, best first", async () => {
@@ -45,6 +60,25 @@ describe("searchService", () => {
     expect(cards).toHaveLength(1);
     expect(cards[0].price).toBe(1775); // cheapest advertised price is primary
     expect(cards[0].alsoListedOn).toEqual([{ platform: "rentcafe", price: 1845 }]);
+  });
+
+  it("shortTerm: false is a hard filter, not a no-op — no returned listing is shortTermOk (regression)", async () => {
+    vi.mocked(parseQuery).mockResolvedValueOnce({ ...NO_FILTERS, shortTerm: false });
+    const r = await searchService.search("no month-to-month");
+    expect(r.listings.length).toBeGreaterThan(0);
+    expect(r.listings.every((l) => l.shortTermOk === false)).toBe(true);
+  });
+
+  it("matches() rejects a shortTermOk listing when shortTerm: false is requested (regression, unit-level)", () => {
+    // The seed corpus has no shortTermOk: true listing, so the search-level
+    // test above can't by itself distinguish the fix from the prior bug
+    // (`p.shortTerm === true && !l.shortTermOk`, a no-op for shortTerm: false).
+    // This exercises matches() directly against a synthetic positive case.
+    const now = new Date();
+    const base = toListing(buildSeedUnits(now)[0], now);
+    const query: ParsedQuery = { ...NO_FILTERS, shortTerm: false };
+    expect(matches({ ...base, shortTermOk: true }, query)).toBe(false);
+    expect(matches({ ...base, shortTermOk: false }, query)).toBe(true);
   });
 
   it("reports timing with the seeded corpus size", async () => {
