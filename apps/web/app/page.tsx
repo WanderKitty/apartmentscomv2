@@ -90,7 +90,7 @@ export default async function Home(props: PageProps<"/">) {
         <ParseEcho parsed={parsed} />
         <p className="mt-1 text-[12px] text-muted-soft">
           search {timing.searchMs}ms · p50 {timing.p50SearchMs}ms over{" "}
-          {timing.corpus} listings (in-memory)
+          {timing.corpus} listings (Postgres)
         </p>
       </div>
 
