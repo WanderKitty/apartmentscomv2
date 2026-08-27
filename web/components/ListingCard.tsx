@@ -2,12 +2,7 @@ import Link from "next/link";
 import type { Listing } from "@/lib/types";
 import { formatBedsBaths, formatPrice, formatSqft } from "@/lib/format";
 import { FreshnessBadge } from "./FreshnessBadge";
-
-function lastDrop(listing: Listing): number | null {
-  const last = listing.priceHistory[listing.priceHistory.length - 1];
-  if (!last || last.to >= last.from) return null;
-  return last.from - last.to;
-}
+import { TimeBadges } from "./TimeBadges";
 
 /**
  * One ranked result. Horizontal list-card: 1:1 photo slot left (photos are
@@ -23,7 +18,6 @@ export function ListingCard({
   now: Date;
   debug?: boolean;
 }) {
-  const drop = lastDrop(listing);
   const facts = [
     formatBedsBaths(listing.beds, listing.baths),
     formatSqft(listing.sqft),
@@ -63,11 +57,6 @@ export function ListingCard({
                 Starting at — units may cost more
               </span>
             )}
-            {drop !== null && (
-              <span className="text-[13px] font-medium text-success">
-                ↓ {formatPrice(drop)} drop
-              </span>
-            )}
             <span className="ml-auto hidden sm:block">
               <FreshnessBadge lastConfirmedAt={listing.lastConfirmedAt} now={now} />
             </span>
@@ -92,6 +81,25 @@ export function ListingCard({
               {listing.amenities.join(" · ")}
             </p>
           )}
+
+          <div className="mt-0.5">
+            <TimeBadges
+              events={listing.events}
+              daysOnMarket={listing.daysOnMarket}
+              now={now}
+            />
+          </div>
+
+          {listing.alsoListedOn.map((also) => (
+            <p
+              key={also.platform}
+              className="text-[13px] text-muted-soft"
+            >
+              {also.price !== null
+                ? `Also listed at ${formatPrice(also.price)}/mo on ${also.platform}`
+                : `Also listed on ${also.platform}, price not listed`}
+            </p>
+          ))}
 
           <span className="sm:hidden">
             <FreshnessBadge lastConfirmedAt={listing.lastConfirmedAt} now={now} />

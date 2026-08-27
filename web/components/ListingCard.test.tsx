@@ -32,7 +32,7 @@ describe("ListingCard", () => {
 
   it("shows a price-drop signal when history has a drop", () => {
     render(<ListingCard listing={byId("seed___u0001")} now={NOW} />);
-    expect(screen.getByText(/\$150 drop/)).toBeInTheDocument();
+    expect(screen.getByText("↓$150 on Aug 21")).toBeInTheDocument();
   });
 
   it("links to the listing detail page", () => {

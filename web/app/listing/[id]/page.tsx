@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FreshnessBadge } from "@/components/FreshnessBadge";
+import { TrueCostCard } from "@/components/TrueCostCard";
+import { TimeBadges } from "@/components/TimeBadges";
 import { searchService } from "@/lib/search";
 import {
   formatBedsBaths,
@@ -74,6 +76,14 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
                 Not seen recently — may be gone
               </span>
             )}
+          </div>
+
+          <div className="mt-3">
+            <TimeBadges
+              events={listing.events}
+              daysOnMarket={listing.daysOnMarket}
+              now={now}
+            />
           </div>
 
           <p className="mt-4 text-[16px] font-medium text-ink">
@@ -197,6 +207,12 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
               <p className="mt-1 text-[13px] text-body">
                 Current offer: {listing.concessionsText}
               </p>
+            )}
+
+            {listing.trueCost !== null && (
+              <div className="mt-4">
+                <TrueCostCard trueCost={listing.trueCost} />
+              </div>
             )}
 
             <div className="my-4 border-t border-hairline-soft" />

@@ -1,6 +1,17 @@
 import type { ParsedQuery } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
 
+function parseSourceLabel(parsed: ParsedQuery): string {
+  switch (parsed.parseSource) {
+    case "llm":
+      return `parsed by Haiku · ${parsed.parseMs}ms`;
+    case "cache":
+      return "parsed from cache";
+    case "fallback":
+      return "keyword fallback";
+  }
+}
+
 function chips(parsed: ParsedQuery): string[] {
   const out: string[] = [...parsed.neighborhoods];
   if (parsed.priceMax !== null) out.push(`Under ${formatPrice(parsed.priceMax)}`);
@@ -41,6 +52,9 @@ export function ParseEcho({ parsed }: { parsed: ParsedQuery }) {
           — couldn’t parse filters, searching the words themselves
         </span>
       )}
+      <span className="text-[12px] text-muted-soft">
+        {parseSourceLabel(parsed)}
+      </span>
     </div>
   );
 }

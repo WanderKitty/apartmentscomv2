@@ -2,6 +2,7 @@ import Link from "next/link";
 import { SearchBar } from "@/components/SearchBar";
 import { ParseEcho } from "@/components/ParseEcho";
 import { ListingCard } from "@/components/ListingCard";
+import { SeedBanner } from "@/components/SeedBanner";
 import { searchService } from "@/lib/search";
 
 const EXAMPLE_QUERIES = [
@@ -72,7 +73,7 @@ export default async function Home(props: PageProps<"/">) {
     );
   }
 
-  const { listings, parsed, totalCount } = await searchService.search(q);
+  const { listings, parsed, totalCount, timing } = await searchService.search(q);
   const debugToggleHref = debug
     ? `/?q=${encodeURIComponent(q)}`
     : `/?q=${encodeURIComponent(q)}&debug=1`;
@@ -82,7 +83,15 @@ export default async function Home(props: PageProps<"/">) {
       <SearchBar defaultValue={q} />
 
       <div className="mt-4">
+        <SeedBanner corpus={timing.corpus} />
+      </div>
+
+      <div className="mt-4">
         <ParseEcho parsed={parsed} />
+        <p className="mt-1 text-[12px] text-muted-soft">
+          search {timing.searchMs}ms · p50 {timing.p50SearchMs}ms over{" "}
+          {timing.corpus} listings (in-memory)
+        </p>
       </div>
 
       <div className="mt-6 flex items-baseline justify-between border-b border-hairline-soft pb-3">
