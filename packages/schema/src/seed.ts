@@ -1,12 +1,12 @@
-import type { Listing, TrueCost } from "./types";
+import type { Listing, UiListingEvent as UiEvent, TrueCost } from "./types";
 import {
   ProcessedUnitDataSchema,
   SOURCE_ID_SEPARATOR,
   minimalUnit,
   type ListingEvent,
   type ProcessedUnitData,
-} from "./schema/processed-unit-data";
-import { netEffectiveMonthlyCents } from "./schema/net-effective";
+} from "./processed-unit-data";
+import { netEffectiveMonthlyCents } from "./net-effective";
 
 const DAY = 86_400_000;
 const iso = (now: Date, daysAgo: number) => new Date(now.getTime() - daysAgo * DAY).toISOString();
@@ -48,7 +48,7 @@ function seedUnit(n: number, over: Partial<ProcessedUnitData>): ProcessedUnitDat
 }
 
 /** Neighborhood centroids (approx) so geo stays plausible. */
-const GEO: Record<string, [number, number]> = {
+export const GEO: Record<string, [number, number]> = {
   "Lake Eola Heights": [28.5479, -81.3722], "Thornton Park": [28.5416, -81.3695],
   "Downtown Orlando": [28.5421, -81.379], "Mills 50": [28.5533, -81.3645],
   "College Park": [28.5702, -81.3937], "Baldwin Park": [28.5691, -81.3287],
@@ -88,7 +88,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
         property_unit_count: 212, is_property_unit_count_not_mentioned: false,
         neighborhood: "Lake Eola Heights",
         address_line1: "521 E Central Blvd", zip: "32801",
-        latitude: GEO["Lake Eola Heights"][0], longitude: GEO["Lake Eola Heights"][1],
+        latitude: GEO["Lake Eola Heights"]![0], longitude: GEO["Lake Eola Heights"]![1],
         unit_number: "304", floorplan_name: "A2", beds: 1, baths: 1, sqft: 742,
         floor_level: 3, is_floor_level_not_mentioned: false,
         advertised_rent_cents: advertised, price_level: "unit", is_price_transparent: true,
@@ -159,7 +159,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
         property_name: "The Foundry SoDo",
         neighborhood: "SoDo",
         address_line1: "88 W Grant St", zip: "32806",
-        latitude: GEO.SoDo[0], longitude: GEO.SoDo[1],
+        latitude: GEO.SoDo![0], longitude: GEO.SoDo![1],
         unit_number: null, floorplan_name: "S1 Studio", beds: 0, baths: 1, sqft: 528,
         advertised_rent_cents: advertised, price_level: "floorplan_starting_at",
         is_price_transparent: false,
@@ -195,7 +195,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
       property_name: "Baldwin Harbor Flats",
       neighborhood: "Baldwin Park",
       address_line1: "4650 New Broad St", zip: "32814",
-      latitude: GEO["Baldwin Park"][0], longitude: GEO["Baldwin Park"][1],
+      latitude: GEO["Baldwin Park"]![0], longitude: GEO["Baldwin Park"]![1],
       floorplan_name: "C3", beds: 3, baths: 2, sqft: 1410,
       advertised_rent_cents: null, is_rent_not_mentioned: true,
       price_level: "not_listed", is_price_transparent: false,
@@ -236,7 +236,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
 
   V.forEach(([name, hood, beds, baths, sqft, rent, daysListed, ua, ca, avail, confHrs], i) => {
     const n = i + 5;
-    const [lat, lng] = GEO[hood];
+    const [lat, lng] = GEO[hood]!;
     const events: ListingEvent[] = [ev(now, daysListed, "first_listed", null, rent)];
     // deterministic price-history spice: every 5th varied unit gets a drop
     if (i % 5 === 4) {

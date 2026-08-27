@@ -1,4 +1,4 @@
-import { buildSeedUnits, toListing } from "./seed";
+import { buildSeedUnits, toListing } from "@aptv2/schema";
 import { parseQuery } from "./parse/llm-parse";
 import type { Listing, ParsedQuery, SearchResult, SearchService } from "./types";
 

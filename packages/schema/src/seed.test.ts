@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ProcessedUnitDataSchema } from "./schema/processed-unit-data";
+import { ProcessedUnitDataSchema } from "./processed-unit-data";
 import { buildSeedUnits, toListing } from "./seed";
 
 const NOW = new Date("2026-08-27T12:00:00.000Z");
@@ -60,7 +60,7 @@ describe("seed data", () => {
   it("gives every non-Ridgewood unit a distinct address, and the Ridgewood pair a shared one", () => {
     const ridgewood = units.filter((u) => u.property_name === "Ridgewood House");
     expect(ridgewood).toHaveLength(2);
-    expect(ridgewood[0].address_line1).toBe(ridgewood[1].address_line1);
+    expect(ridgewood[0]!.address_line1).toBe(ridgewood[1]!.address_line1);
 
     const others = units.filter((u) => u.property_name !== "Ridgewood House");
     expect(new Set(others.map((u) => u.address_line1)).size).toBe(others.length);

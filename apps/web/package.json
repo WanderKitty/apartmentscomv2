@@ -8,12 +8,12 @@
     "start": "next start",
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",
-    "lint": "eslint",
-    "gen:schema-docs": "npx tsx scripts/gen-schema-docs.ts"
+    "lint": "eslint"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
     "@aptv2/db": "workspace:*",
+    "@aptv2/schema": "workspace:*",
     "next": "16.3.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",

@@ -4,32 +4,13 @@
 // to `now` so freshness labels stay realistic.
 
 import type { Listing, SourceHealth } from "./types";
-import { buildSeedUnits, toListing } from "./seed";
+import { buildSeedUnits, toListing } from "@aptv2/schema";
+
+export { NEIGHBORHOOD_ALIASES, AMENITY_KEYWORDS } from "@aptv2/schema";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
-
-export const NEIGHBORHOOD_ALIASES: Record<string, string[]> = {
-  "Lake Eola Heights": ["lake eola heights", "lake eola", "eola"],
-  "Thornton Park": ["thornton park"],
-  "Downtown Orlando": ["downtown orlando", "downtown", "cbd"],
-  "Mills 50": ["mills 50", "mills fifty"],
-  "College Park": ["college park"],
-  "Baldwin Park": ["baldwin park"],
-  SoDo: ["sodo", "south downtown"],
-  "Audubon Park": ["audubon park"],
-  "Lake Nona": ["lake nona"],
-};
-
-export const AMENITY_KEYWORDS: Record<string, string[]> = {
-  pool: ["pool"],
-  gym: ["gym", "fitness"],
-  "in-unit laundry": ["in-unit laundry", "washer", "laundry"],
-  "pet friendly": ["pet friendly", "pets", "dog", "cat"],
-  parking: ["parking", "garage"],
-  balcony: ["balcony"],
-};
 
 export function makeListings(now: Date): Listing[] {
   return buildSeedUnits(now).map((u) => toListing(u, now));
