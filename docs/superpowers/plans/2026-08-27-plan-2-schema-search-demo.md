@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** An end-of-day demo on the `web-ui-skeleton` worktree: a ~90-field enum-constrained unit schema (`v1_processed_unit_data`, 92 fields as authored), 24 honestly-labeled seeded Orlando listings with concession math and price history, a real Haiku NL query parser with fail-open ladder, and UI that shows true-cost arithmetic, time badges, parse echo, and search timing.
+**Goal:** An end-of-day demo on the `web-ui-skeleton` worktree: a ~90-field enum-constrained unit schema (`v1_processed_unit_data`, 93 fields as authored), 26 honestly-labeled seeded Orlando listings with concession math, price history, and a deliberate cross-platform duplicate pair collapsed in search (visible as "Also listed on"), a real Haiku NL query parser with fail-open ladder, UI that shows true-cost arithmetic, time badges, parse echo, and search timing, plus a framing-compliant schema lineage doc.
 
 **Architecture:** All work happens inside the existing Next.js 16 app at `web/` in the worktree `X:\apartmentscomv2\.claude\worktrees\web-ui-skeleton` (branch `worktree-web-ui-skeleton`). The schema is a Zod module; seed data is deterministic TS (defaults + exemplars + a variation table) validated through the schema and projected to the UI's existing `Listing` type; search stays in-memory server-side (SSR page → SearchService), which is the honest, fast demo path — Postgres integration is post-demo. The LLM parse is a server-only module with an in-memory cache and the mock keyword parser as its fallback rung.
 
@@ -160,10 +160,10 @@ describe("ProcessedUnitDataSchema", () => {
     expect(() => ProcessedUnitDataSchema.parse(bad)).toThrow();
   });
 
-  it("field count is ~90 (92 as authored)", () => {
+  it("field count is ~90 (93 as authored)", () => {
     const n = Object.keys(ProcessedUnitDataSchema.shape).length;
     expect(n).toBeGreaterThanOrEqual(60);
-    // Upper bound guards accidental bloat only — never trim real fields to fit it.
+    // Sanity rail, not a target — never trim real fields to fit it.
     expect(n).toBeLessThanOrEqual(95);
   });
 
@@ -329,6 +329,19 @@ export const ProcessedUnitDataSchema = z.object({
   num_views: z.number().int().nonnegative().nullable().default(null),
   num_saves: z.number().int().nonnegative().nullable().default(null),
 
+  // ---- MANAGEMENT SIGNALS (reserved; null until real renter traffic) ----
+  // The landlord-facing analog of the outcome signals job aggregators
+  // compute for employers.
+  management_signals: z
+    .object({
+      maintenance_responsive: z.boolean().nullable().default(null),
+      deposit_fairness: z.boolean().nullable().default(null),
+      renewal_pressure: z.boolean().nullable().default(null),
+      updated_at: z.string().datetime().nullable().default(null),
+    })
+    .nullable()
+    .default(null),
+
   // ---- GENERATED ------------------------------------------------------
   generated_summary: z.string().nullable().default(null),
   events: z.array(ListingEventSchema).default([]),
@@ -396,7 +409,7 @@ writeFileSync(
 console.log(`wrote docs/schema.md (${rows.length} fields)`);
 ```
 
-Run in `web/`: `npm run gen:schema-docs` — expect `wrote docs/schema.md (92 fields)` (60–95 acceptable if the schema legitimately evolves). (Zod v4 introspection API: if `def.type`/`def.entries` differ in the installed version, adapt the script to the version's documented introspection — the doc table is the deliverable, the exact API is not.)
+Run in `web/`: `npm run gen:schema-docs` — expect `wrote docs/schema.md (93 fields)` (60–95 acceptable if the schema legitimately evolves). (Zod v4 introspection API: if `def.type`/`def.entries` differ in the installed version, adapt the script to the version's documented introspection — the doc table is the deliverable, the exact API is not.)
 
 - [ ] **Step 8: Commit**
 
@@ -440,7 +453,14 @@ export interface ListingEvent {
 }
 ```
 
-and add to `Listing`: `events: ListingEvent[];`, `trueCost: TrueCost | null;`, `provenance: "seed" | "scraped";`, `daysOnMarket: number;`.
+and add to `Listing`: `events: ListingEvent[];`, `trueCost: TrueCost | null;`, `provenance: "seed" | "scraped";`, `daysOnMarket: number;`, plus (B1):
+
+```ts
+  /** Other sources advertising the same physical unit (dedup collapse). */
+  alsoListedOn: Array<{ platform: string; price: number | null }>;
+  /** liberal_dedup_cluster carried through for the search-layer collapse. */
+  dedupCluster: string;
+```
 
 - [ ] **Step 2: Write the failing seed test**
 
@@ -456,13 +476,22 @@ const NOW = new Date("2026-08-27T12:00:00.000Z");
 describe("seed data", () => {
   const units = buildSeedUnits(NOW);
 
-  it("has 24 schema-valid, seed-labeled units with unique ids", () => {
-    expect(units).toHaveLength(24);
+  it("has 26 schema-valid, seed-labeled units with unique ids", () => {
+    expect(units).toHaveLength(26);
     for (const u of units) {
       ProcessedUnitDataSchema.parse(u);
       expect(u.data_provenance).toBe("seed");
     }
-    expect(new Set(units.map((u) => u.source_id)).size).toBe(24);
+    expect(new Set(units.map((u) => u.source_id)).size).toBe(units.length);
+  });
+
+  it("contains exactly one multi-source dedup cluster, of size 2", () => {
+    const byCluster = new Map<string, number>();
+    for (const u of units) {
+      byCluster.set(u.liberal_dedup_cluster, (byCluster.get(u.liberal_dedup_cluster) ?? 0) + 1);
+    }
+    const multi = [...byCluster.values()].filter((c) => c > 1);
+    expect(multi).toEqual([2]);
   });
 
   it("has at least 4 units with concession math and correct arithmetic", () => {
@@ -536,6 +565,9 @@ function withFreqs(u: ProcessedUnitData): ProcessedUnitData {
   };
 }
 
+const slug = (s: string) =>
+  s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+
 function seedUnit(n: number, over: Partial<ProcessedUnitData>): ProcessedUnitData {
   const id = `u${String(n).padStart(4, "0")}`;
   const base = minimalUnit();
@@ -546,6 +578,13 @@ function seedUnit(n: number, over: Partial<ProcessedUnitData>): ProcessedUnitDat
     source_url: `https://example.com/seed/${id}`,
     ...over,
   };
+  // Per-physical-unit dedup cluster unless the override pinned one (B1):
+  // every unit must NOT inherit minimalUnit()'s example cluster.
+  if (!over.liberal_dedup_cluster) {
+    merged.liberal_dedup_cluster = `orlando:${slug(merged.property_name)}-${slug(
+      merged.unit_number ?? merged.floorplan_name ?? id,
+    )}`;
+  }
   return ProcessedUnitDataSchema.parse(withFreqs(merged));
 }
 
@@ -680,8 +719,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
       floorplan_name: "C3", beds: 3, baths: 2, sqft: 1410,
       advertised_rent_cents: null, is_rent_not_mentioned: true,
       price_level: "not_listed", is_price_transparent: false,
-      // concession_type deliberately stays "not_mentioned": this source publishes
-      // nothing, showcasing the none-vs-not_mentioned distinction the schema exists for.
+      concession_type: "none", // review ruling A4: explicit none everywhere there truly is none
       pets_allowed: "not_mentioned",
       community_amenities: ["pool", "playground", "parking"],
       first_seen_at: iso(now, 9), last_confirmed_at: iso(now, 2),
@@ -727,25 +765,38 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
       events.push(ev(now, Math.max(2, Math.floor(daysListed / 3)), "price_drop", prior, rent));
     }
     events.push(ev(now, confHrs / 24, "confirmed", null, null));
-    // deterministic concession spice: every 7th varied unit gets 4 weeks free / 12 mo
-    const hasConcession = i % 7 === 6;
-    if (hasConcession) {
-      events.push(ev(now, Math.max(1, Math.floor(daysListed / 4)), "concession_added", null, null, "4 weeks free on 12-month leases"));
+    // Deterministic concessions on two fixed rows (review ruling A3):
+    // i===2 → 4 weeks free / 12 mo; i===12 → $1,000 flat discount / 12 mo.
+    const concession =
+      i === 2
+        ? {
+            concession_type: "free_weeks" as const,
+            concession_free_weeks: 4,
+            concession_applies_lease_months: 12,
+            concession_text_raw: "4 weeks free on 12-month leases",
+            net_effective_monthly_cents: netEffectiveMonthlyCents({
+              advertisedCents: rent,
+              concession: { kind: "free_weeks", weeks: 4, leaseMonths: 12 },
+            }),
+          }
+        : i === 12
+          ? {
+              concession_type: "flat_discount" as const,
+              concession_value_cents: 100000,
+              concession_applies_lease_months: 12,
+              concession_text_raw: "$1,000 off — limited time",
+              net_effective_monthly_cents: netEffectiveMonthlyCents({
+                advertisedCents: rent,
+                concession: { kind: "flat_discount", valueCents: 100000, leaseMonths: 12 },
+              }),
+            }
+          : null;
+    if (concession) {
+      events.push(ev(now, 7, "concession_added", null, null, concession.concession_text_raw));
     }
     units.push(
       seedUnit(n, {
-        ...(hasConcession
-          ? {
-              concession_type: "free_weeks" as const,
-              concession_free_weeks: 4,
-              concession_applies_lease_months: 12,
-              concession_text_raw: "4 weeks free on 12-month leases",
-              net_effective_monthly_cents: netEffectiveMonthlyCents({
-                advertisedCents: rent,
-                concession: { kind: "free_weeks", weeks: 4, leaseMonths: 12 },
-              }),
-            }
-          : { concession_type: "none" as const }), // fictional sources state "no specials" — explicit none
+        ...(concession ?? { concession_type: "none" as const }), // A4: explicit none where truly none
         property_name: name, neighborhood: hood, latitude: lat, longitude: lng,
         beds, baths, sqft, is_sqft_not_mentioned: sqft === null,
         floorplan_name: `${"SABC"[beds]}${(i % 3) + 1}`,
@@ -761,6 +812,39 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
       }),
     );
   });
+
+  // ---- B1: deliberate cross-platform duplicate — same physical unit, two sources.
+  // SAME liberal_dedup_cluster, DIFFERENT collapse_key; provenance stays "seed"
+  // (platform and provenance are separate schema fields for exactly this).
+  const ridgewoodCluster = "orlando:412-e-ridgewood-st-402";
+  units.push(
+    seedUnit(25, {
+      source_id: `rentcafe${SOURCE_ID_SEPARATOR}ridgewood-402`,
+      platform: "rentcafe",
+      collapse_key: "rentcafe:ridgewood-402",
+      liberal_dedup_cluster: ridgewoodCluster,
+      property_name: "Ridgewood House",
+      unit_number: "402", floorplan_name: "A1", beds: 1, baths: 1, sqft: 705,
+      advertised_rent_cents: 184500, price_level: "unit", is_price_transparent: true,
+      concession_type: "none",
+      first_seen_at: iso(now, 18), last_confirmed_at: iso(now, 1),
+      estimated_publish_date: iso(now, 18).slice(0, 10), days_on_market: 18,
+      events: [ev(now, 18, "first_listed", null, 184500), ev(now, 1, "confirmed")],
+    }),
+    seedUnit(26, {
+      source_id: `appfolio${SOURCE_ID_SEPARATOR}ridgewood-402`,
+      platform: "appfolio",
+      collapse_key: "appfolio:ridgewood-402",
+      liberal_dedup_cluster: ridgewoodCluster,
+      property_name: "Ridgewood House",
+      unit_number: "402", floorplan_name: "A1", beds: 1, baths: 1, sqft: 705,
+      advertised_rent_cents: 177500, price_level: "unit", is_price_transparent: true,
+      concession_type: "none",
+      first_seen_at: iso(now, 6), last_confirmed_at: iso(now, 0.5), // fresher source
+      estimated_publish_date: iso(now, 6).slice(0, 10), days_on_market: 6,
+      events: [ev(now, 6, "first_listed", null, 177500), ev(now, 0.5, "confirmed")],
+    }),
+  );
 
   return units;
 }
@@ -787,11 +871,14 @@ function trueCostOf(u: ProcessedUnitData): TrueCost | null {
     : u.concession_type === "free_months" && lease ? `${u.concession_free_months} mo free ÷ ${lease} mo`
     : u.concession_type === "flat_discount" && lease ? `$${d(u.concession_value_cents ?? 0)} off ÷ ${lease} mo`
     : "No concessions";
+  const advertisedMonthly = d(u.advertised_rent_cents);
+  const concessionMonthly = d(u.advertised_rent_cents - net);
   return {
-    advertisedMonthly: d(u.advertised_rent_cents),
+    advertisedMonthly,
     concessionLabel: label,
-    concessionMonthly: d(u.advertised_rent_cents - net),
-    netEffectiveMonthly: d(net),
+    concessionMonthly,
+    // Derived after rounding (A10) so displayed arithmetic can never drift $1.
+    netEffectiveMonthly: advertisedMonthly - concessionMonthly,
     moveInFees: fees,
   };
 }
@@ -824,6 +911,8 @@ export function toListing(u: ProcessedUnitData, now: Date): Listing {
     description: u.generated_summary,
     score: { textRelevance: 0, freshness: 0, trust: 0, proximity: 0, total: 0 },
     events: u.events.map((e) => ({ at: e.at, kind: e.kind, fromCents: e.from_cents, toCents: e.to_cents, note: e.note })),
+    alsoListedOn: [],
+    dedupCluster: u.liberal_dedup_cluster,
     trueCost: trueCostOf(u),
     provenance: u.data_provenance,
     daysOnMarket: u.days_on_market ?? Math.max(0, Math.round((now.getTime() - new Date(u.first_seen_at).getTime()) / 86_400_000)),
@@ -1008,6 +1097,7 @@ export async function parseQueryWith(
   if (!client) return fallback();
 
   const started = performance.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const response = await Promise.race([
@@ -1018,9 +1108,9 @@ export async function parseQueryWith(
         messages: [{ role: "user", content: raw }],
         output_config: { format: zodOutputFormat(LlmParseSchema) },
       }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("parse-timeout")), timeoutMs),
-      ),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("parse-timeout")), timeoutMs);
+      }),
     ]);
     const out = response.parsed_output;
     if (!out) return fallback();
@@ -1040,6 +1130,8 @@ export async function parseQueryWith(
     return parsed;
   } catch {
     return fallback(); // timeout, network, refusal, anything → keyword rung
+  } finally {
+    if (timer) clearTimeout(timer); // A6: never leave the race's timer live
   }
 }
 
@@ -1103,6 +1195,7 @@ vi.mock("./parse/llm-parse", async () => {
 });
 
 import { searchService } from "./search";
+import { buildSeedUnits } from "./seed";
 
 describe("searchService", () => {
   it("the demo query returns only matching listings, best first", async () => {
@@ -1124,15 +1217,28 @@ describe("searchService", () => {
     }
   });
 
-  it("results are ordered by total score (among price-disclosed listings)", async () => {
+  it("orders priced results by descending score, null-price listings strictly after (A7)", async () => {
     const r = await searchService.search("2 bed");
-    const scores = r.listings.filter((l) => l.price !== null).map((l) => l.score.total);
+    const firstNull = r.listings.findIndex((l) => l.price === null);
+    const priced = firstNull === -1 ? r.listings : r.listings.slice(0, firstNull);
+    const scores = priced.map((l) => l.score.total);
     expect([...scores].sort((a, b) => b - a)).toEqual(scores);
+    if (firstNull !== -1) {
+      expect(r.listings.slice(firstNull).every((l) => l.price === null)).toBe(true);
+    }
+  });
+
+  it("collapses the cross-platform duplicate into one card with alsoListedOn (B1)", async () => {
+    const r = await searchService.search("1 bed");
+    const cards = r.listings.filter((l) => l.propertyName === "Ridgewood House");
+    expect(cards).toHaveLength(1);
+    expect(cards[0].price).toBe(1775); // cheapest advertised price is primary
+    expect(cards[0].alsoListedOn).toEqual([{ platform: "rentcafe", price: 1845 }]);
   });
 
   it("reports timing with the seeded corpus size", async () => {
     const r = await searchService.search("studio");
-    expect(r.timing.corpus).toBe(24);
+    expect(r.timing.corpus).toBe(buildSeedUnits(new Date()).length);
     expect(r.timing.searchMs).toBeGreaterThanOrEqual(0);
     expect(r.timing.p50SearchMs).toBeGreaterThanOrEqual(0);
   });
@@ -1184,6 +1290,36 @@ function score(l: Listing, now: Date): Listing {
   return { ...l, score: { textRelevance: 0, freshness, trust, proximity: 0, total } };
 }
 
+/**
+ * B1: collapse duplicate physical units AFTER matching. Cheapest advertised
+ * price becomes the primary card; the rest survive as alsoListedOn entries.
+ * Information is never dropped.
+ */
+function collapseDuplicates(listings: Listing[]): Listing[] {
+  const byCluster = new Map<string, Listing[]>();
+  for (const l of listings) {
+    const group = byCluster.get(l.dedupCluster) ?? [];
+    group.push(l);
+    byCluster.set(l.dedupCluster, group);
+  }
+  const out: Listing[] = [];
+  for (const group of byCluster.values()) {
+    if (group.length === 1) {
+      out.push(group[0]);
+      continue;
+    }
+    const sorted = [...group].sort(
+      (a, b) => (a.price ?? Infinity) - (b.price ?? Infinity),
+    );
+    const [primary, ...rest] = sorted;
+    out.push({
+      ...primary,
+      alsoListedOn: rest.map((r) => ({ platform: r.platform, price: r.price })),
+    });
+  }
+  return out;
+}
+
 const recentSearchMs: number[] = [];
 function recordP50(ms: number): number {
   recentSearchMs.push(ms);
@@ -1199,15 +1335,16 @@ export const searchService: SearchService = {
     const t0 = performance.now();
     const all = corpus(now);
     const scored = all.filter((l) => matches(l, parsed)).map((l) => score(l, now));
-    scored.sort((a, b) => {
+    const collapsed = collapseDuplicates(scored);
+    collapsed.sort((a, b) => {
       if ((a.price === null) !== (b.price === null)) return a.price === null ? 1 : -1; // undisclosed price last
       return b.score.total - a.score.total;
     });
     const searchMs = Math.round((performance.now() - t0) * 100) / 100;
     return {
-      listings: scored,
+      listings: collapsed,
       parsed,
-      totalCount: scored.length,
+      totalCount: collapsed.length,
       timing: { parseMs: parsed.parseMs, searchMs, p50SearchMs: recordP50(searchMs), corpus: all.length },
     };
   },
@@ -1394,7 +1531,7 @@ export function TimeBadges({ events, daysOnMarket, now }: { events: ListingEvent
 }
 ```
 
-(If `bg-surface-2` isn't an existing token in `globals.css`, use the closest existing muted-surface token — match, don't invent.)
+(A8: verify both `text-body` and `bg-surface-2` exist in `globals.css` before using them; if either is missing, use the closest existing token — match, don't invent.)
 
 `web/components/SeedBanner.tsx`:
 
@@ -1414,7 +1551,8 @@ export function SeedBanner({ corpus }: { corpus: number }) {
 - [ ] **Step 3: Wire into pages and existing components**
 
 - `ParseEcho.tsx`: after the chips, render a small badge for `parsed.parseSource` — `llm` → "parsed by Haiku · {parseMs}ms", `cache` → "parsed from cache", `fallback` → "keyword fallback". Keep the existing `failedOpen` message.
-- `ListingCard.tsx`: render `<TimeBadges events={listing.events} daysOnMarket={listing.daysOnMarket} now={now} />` in the meta column; keep the existing price-drop line if redundant info doesn't double up (prefer TimeBadges; delete `lastDrop` if superseded).
+- `ListingCard.tsx`: render `<TimeBadges events={listing.events} daysOnMarket={listing.daysOnMarket} now={now} />` in the meta column; keep the existing price-drop line if redundant info doesn't double up (prefer TimeBadges; delete `lastDrop` if superseded). When `listing.alsoListedOn` is non-empty, render one muted line per entry: `Also listed at ${price}/mo on {platform}` (B1 — since the cheapest source is the primary card, this line shows the pricier source, e.g. the appfolio-$1,775 card says "Also listed at $1,845/mo on rentcafe").
+- A9: `now` is threaded from the page as a prop everywhere (`ListingCard`, `TimeBadges`) — never compute `new Date()` inside a component (deterministic SSR/hydration).
 - `app/page.tsx` (results view): render `<SeedBanner corpus={result.timing.corpus} />` above results and a timing line under the parse echo: `search {searchMs}ms · p50 {p50SearchMs}ms over {corpus} listings (in-memory)`.
 - `app/listing/[id]/page.tsx`: render `<TrueCostCard trueCost={listing.trueCost} />` when non-null, and `<TimeBadges …/>`.
 
@@ -1435,13 +1573,39 @@ git commit -m "feat: true-cost card, time badges, provenance banner, parse-sourc
 
 **Files:**
 - Modify: `web/README.md` (replace scaffold README with demo story)
+- Create: `web/docs/lineage.md` (hand-written — NOT part of gen-schema-docs output)
 - Test: whole suite + build + a scripted DoD checklist in the task report
 
 **Interfaces:** none new — this task verifies and documents.
 
 - [ ] **Step 1: README**
 
-Rewrite `web/README.md` with: what the demo shows (schema-first pitch: extraction depth at ingest, NL parse at the front door), how to run it (`npm install; npm run dev`, optional `ANTHROPIC_API_KEY` for the live Haiku parse — without it the parser visibly falls back to keywords), the schema doc pointer (`docs/schema.md`), and a "Where the ideas come from" paragraph **obeying the framing constraints verbatim** (studied public payloads from my own browsing session; schema-implies-LLM-extraction phrased as inference; no anti-bot mentions; field-name homages named as homages: `collapse_key`, `liberal_dedup_cluster`, `original_source_id`).
+Rewrite `web/README.md` with: what the demo shows (schema-first pitch: extraction depth at ingest, NL parse at the front door), how to run it (`npm install; npm run dev`, optional `ANTHROPIC_API_KEY` for the live Haiku parse — without it the parser visibly falls back to keywords), the schema doc pointer (`docs/schema.md`), and a "Where the ideas come from" paragraph **obeying the framing constraints verbatim** (studied public payloads from my own browsing session; schema-implies-LLM-extraction phrased as inference; no anti-bot mentions; field-name homages named as homages: `collapse_key`, `liberal_dedup_cluster`, `original_source_id`). Immediately after the framing paragraph add exactly: "The schema also reserves management_signals — the landlord-facing analog of the outcome signals job aggregators compute for employers — populated from real renter interactions post-demo." Link `docs/lineage.md` from the README ("Schema lineage" pointer).
+
+- [ ] **Step 1b: Write the lineage doc**
+
+Create `web/docs/lineage.md` with exactly this content (title, intro, and every table cell verbatim; formatted as a Markdown table):
+
+```markdown
+# Schema lineage — v1_processed_unit_data
+
+The discipline behind this schema came from studying the public payloads of a job aggregator during my own browsing session (see README). Their 91-field enrichment implied LLM extraction at ingest; this maps each observed pattern to our apartment analog. Fields marked (homage) are borrowed deliberately.
+
+| Their observed pattern | Ours | Note |
+|---|---|---|
+| 12 compensation fields (yearly→daily, min+max each) | rent_{monthly,weekly,daily,annual}_cents | one advertised value normalized to every frequency |
+| is_compensation_transparent | is_price_transparent + price_level | "starting at" teasers flagged, never passed off as unit price |
+| — (no job analog exists) | concession_* + net_effective_monthly_cents | concessions amortized into true monthly cost |
+| min_industry_and_role_yoe + is_..._not_mentioned | is_X_not_mentioned companions throughout | absent ≠ zero, everywhere |
+| workplace_cities/counties/states/... | neighborhood / city / county + lat/lng | renter-scale geography |
+| estimated_publish_date (repost defeat) | estimated_publish_date + first_seen_at + last_confirmed_at | plus full event history |
+| collapse_key, liberal_dedup_cluster, original_source_id | same names (homage) | two-tier cross-syndication dedup |
+| company_signals (employer outcome signals) | management_signals (reserved) | their employer seam, our landlord seam |
+| num_views, num_applies | num_views, num_saves (reserved) | demand signals |
+| requirements_summary (generated) | generated_summary | NL summary per listing |
+| enriched_company_data (19 fields) | property-enrichment group | year_built, unit_count, management_company, owner_portfolio |
+| {platform}___{company}___{id} source ids | {platform}___{external_id} | source-of-truth identity |
+```
 
 - [ ] **Step 2: Run the DoD checklist and record evidence in the report**
 
@@ -1452,12 +1616,14 @@ Rewrite `web/README.md` with: what the demo shows (schema-first pitch: extractio
 5. Seed banner visible on results.
 6. String sweep: `grep -ri "hiring" web/app web/components web/lib web/README.md` → only permitted field-name homages and the README's framing paragraph; nothing else.
 7. `git log --oneline` — all Plan 2 commits carry the trailer.
+8. B1: a "1 bed" search shows exactly one Ridgewood House card (the $1,775 appfolio listing) rendering "Also listed at $1,845/mo on rentcafe".
+9. B3: `web/docs/lineage.md` exists with the lineage table, is linked from the README, and obeys the framing constraints.
 
 - [ ] **Step 3: Commit, merge task branches, and stop**
 
 ```bash
-git add web/README.md
-git commit -m "docs: demo README with framing-compliant provenance story"
+git add web/README.md web/docs/lineage.md
+git commit -m "docs: demo README and schema lineage with framing-compliant provenance story"
 ```
 
 Merge the final task branch back into `worktree-web-ui-skeleton`. **Do not merge into master in this task** — the controller merges `worktree-web-ui-skeleton` → master only after the DoD evidence is reviewed and green (user ruling: "merge to master at the end if green").
