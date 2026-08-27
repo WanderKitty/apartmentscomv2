@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Real Orlando RentCafe listings flowing on a schedule through the spec's five-stage pipeline — politeness-compliant scraping into `raw_snapshots`, deterministic + Haiku extraction into `ProcessedUnitData`, the existing `upsertProcessedUnits` seam, vanished-listing sweeps, `scrape_runs` ops records — surfaced in search results and a real `/admin` page.
+**Goal:** Real Orlando RentCafe listings flowing on a schedule through the spec's five-stage pipeline — politeness-compliant scraping into `raw_snapshots`, deterministic + Haiku extraction into `ProcessedUnitData`, the existing `upsertProcessedUnits` seam (amended so price history ACCUMULATES across runs instead of being overwritten), vanished-listing sweeps, `scrape_runs` ops records — surfaced in search results and a real `/admin` page.
 
-**Architecture:** A new `packages/scrapers` owns the network edge: a shared politeness fetcher (robots.txt honored and cached, per-domain token bucket ≤1 req/s, identified User-Agent, exponential backoff) and a `rentcafe` adapter that hits the JSON endpoint each site's own frontend uses (endpoint recorded per source in `sources.endpoint_config`) and returns verbatim payloads. `packages/pipeline` grows the extract stage (`extractSnapshot`): deterministic field mapping first, then one fail-open Haiku structured-output call per *changed* property (cached by content hash in a new `extract_cache` table), feeding the existing upsert seam with `data_provenance: "scraped"`; plus the hash short-circuit (`bumpConfirmed`) and the stale→gone sweep. `apps/worker` schedules `scrape` per enabled source (3×/day, staggered) and processes snapshots with pg-boss retry + failure streaks. `apps/web` gets a real admin read model and a provenance-truthful results banner. Because the real payload shape is only knowable from a real site, Task 3 is an explicit scouting task: verify 3–5 genuinely public, robots-permissive RentCafe communities, capture ONE fixture payload, and reconcile the adapter mapping against it — tests never touch the network (spec §8).
+**Architecture:** A new `packages/scrapers` owns the network edge: a shared politeness fetcher (robots.txt honored and cached, per-domain token bucket ≤1 req/s, identified User-Agent, exponential backoff) and a `rentcafe` adapter that hits the JSON endpoint each site's own frontend uses (endpoint recorded per source in `sources.endpoint_config`) and returns verbatim payloads. `packages/pipeline` grows the extract stage (`extractSnapshot`): deterministic field mapping first, then one fail-open Haiku structured-output call per *changed unit* — finer-grained than the spec's "per changed property" phrasing, deliberately: the cache key is a per-unit content hash in a new `extract_cache` table, so an unchanged unit never re-calls the model even when a sibling unit changed, feeding the existing upsert seam with `data_provenance: "scraped"`; plus the hash short-circuit (`bumpConfirmed`) and the stale→gone sweep. `apps/worker` schedules `scrape` per enabled source (3×/day, staggered) and processes snapshots with pg-boss retry + failure streaks. `apps/web` gets a real admin read model and a provenance-truthful results banner. Because the real payload shape is only knowable from a real site, Task 3 is an explicit scouting task: verify 3–5 genuinely public, robots-permissive RentCafe communities, capture ONE fixture payload, and reconcile the adapter mapping against it — tests never touch the network (spec §8).
 
 **Tech Stack:** Existing monorepo — pnpm, Node ≥22, TS strict, pg 8, PostGIS, pg-boss 10, Vitest, Next 16.3.3. New code uses only existing deps plus `@anthropic-ai/sdk`/`zod` (already in `@aptv2/search`/`@aptv2/schema`); the robots.txt parser and token bucket are written in-repo (no new deps).
 
@@ -14,7 +14,7 @@
 
 - Work in the main checkout `X:\apartmentscomv2`. Integration branch `plan4-integration` off `master`; task branches `task/p4-<n>-<slug>` off it, merged back `--no-ff` after review. Master merge only at the end, if green (controller decision; standing user ruling "merge to master at the end if green").
 - pnpm only. Postgres must be up for DB tests (`docker compose up -d`; `TEST_DATABASE_URL` from root `.env`; `resetTestDb`; `fileParallelism: false` in DB-touching vitest configs).
-- **Compliance (spec §7, binding):** scrape only publicly accessible pages/endpoints; never behind a login; never accept ToS to reach data. Honor robots.txt including crawl-delay; ≤1 req/sec per domain (slower if robots says). User-Agent is exactly `aptv2-research-bot/0.1 (+mailto:volodolzh@gmail.com)` (contact consented by the user 2026-08-27; used ONLY in the outbound UA header — never in any other request field, page, or log shipped off-machine). Photos/marketing copy are linked, never rehosted; verbatim payloads live only in `raw_snapshots`.
+- **Compliance (spec §7, binding):** scrape only publicly accessible pages/endpoints; never behind a login; never accept ToS to reach data. Honor robots.txt including crawl-delay; ≤1 req/sec per domain (slower if robots says). User-Agent is exactly `aptv2-research-bot/0.1 (+mailto:volodolzh@gmail.com)` (contact consented by the user 2026-08-27, with the explicit acknowledgment that this address will appear in every scraped site's server logs; used ONLY in the outbound UA header — never in any other request field, page, or log shipped off-machine; swapping to an alias is a one-line change in `politeness.ts` if the user later prefers one). Photos/marketing copy are linked, never rehosted; verbatim payloads live only in `raw_snapshots`.
 - **Network discipline:** automated tests NEVER hit the network — adapters and extract are tested from checked-in fixture JSON (spec §8). The only networked paths are the scheduled worker jobs and the manual smoke command, and both go through the politeness fetcher. Scouting (Task 3) uses the implementer's browser/curl at human pace against public pages only.
 - **Framing constraints (all user-facing copy):** describe competitor findings as "studied public payloads from my own browsing session"; never name or hint at any site's anti-bot measures; phrase their pipeline as inference. No hiring.cafe-derived strings except the existing homage field names.
 - **Error handling (spec §5):** fail loudly and partially. One property's malformed data fails that property only — counted in `scrape_runs`, never silently skipped. No catch-and-continue without a counted, visible record. The single pre-existing sanctioned silent catch (search_logs) stays as-is.
@@ -164,7 +164,7 @@ git checkout plan4-integration && git merge --no-ff task/p4-1-migration-0006
   - `USER_AGENT = "aptv2-research-bot/0.1 (+mailto:volodolzh@gmail.com)"`
   - `parseRobots(txt: string, userAgent: string): RobotsPolicy` where `RobotsPolicy = { disallow: string[]; crawlDelaySeconds: number | null }`
   - `isPathAllowed(policy: RobotsPolicy, path: string): boolean`
-  - `createPoliteFetcher(opts?: { fetchImpl?: typeof fetch; now?: () => number; sleep?: (ms: number) => Promise<void>; maxRps?: number }): PoliteFetcher` with `PoliteFetcher = { fetchJson(url: string, policy: RobotsPolicy | null): Promise<{ status: number; body: unknown }>; }` — per-domain token bucket (default 1 req/s, slower when `crawlDelaySeconds` is larger), throws `RobotsDisallowedError` before ever sending a disallowed request, retries 5xx/429 with exponential backoff (3 tries max), always sends `USER_AGENT`.
+  - `createPoliteFetcher(opts?: { fetchImpl?: typeof fetch; now?: () => number; sleep?: (ms: number) => Promise<void>; maxRps?: number }): PoliteFetcher` with `PoliteFetcher = { fetchJson(url: string, policy: RobotsPolicy | null): Promise<{ status: number; body: unknown }>; fetchText(url: string, policy: RobotsPolicy | null): Promise<{ status: number; body: string }> }` — both methods share ONE politeness path (robots check, per-domain token bucket at default 1 req/s or slower when `crawlDelaySeconds` is larger, `RobotsDisallowedError` thrown before any disallowed request is sent, 5xx/429 retried with exponential backoff 3 tries max, `USER_AGENT` always sent); they differ only in body handling (parsed JSON vs raw text — `fetchText` exists for robots.txt).
   - `type SourceRow = { id: number; platform: string; name: string; website_url: string; endpoint_config: { endpoint_url: string; property: { name: string; address_line1: string; city: string; state: string; zip: string; latitude: number; longitude: number } }; robots_policy: RobotsPolicy | null; rate_limit_rps: number }`
   - `type RawSnapshotInput = { source_id: number; content_hash: string; payload: unknown }`
   - `type Adapter = { platform: string; fetch(source: SourceRow, fetcher: PoliteFetcher): Promise<RawSnapshotInput> }` — one snapshot per source per run (the whole availability feed, verbatim).
@@ -421,6 +421,31 @@ describe('createPoliteFetcher', () => {
   })
 })
 
+describe('fetchText', () => {
+  it('shares the politeness path and returns raw text', async () => {
+    const calls: Array<{ url: string; headers: Record<string, string> }> = []
+    const impl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), headers: (init?.headers ?? {}) as Record<string, string> })
+      return new Response('User-agent: *\nDisallow: /x', { status: 200, headers: { 'content-type': 'text/plain' } })
+    }) as unknown as typeof fetch
+    const f = createPoliteFetcher({ fetchImpl: impl, sleep: async () => {} })
+    const r = await f.fetchText('https://example.com/robots.txt', null)
+    expect(r.status).toBe(200)
+    expect(r.body).toContain('Disallow: /x')
+    expect(calls[0]!.headers['user-agent']).toBe(USER_AGENT)
+  })
+
+  it('refuses a robots-disallowed path just like fetchJson', async () => {
+    const impl = vi.fn() as unknown as typeof fetch
+    const f = createPoliteFetcher({ fetchImpl: impl, sleep: async () => {} })
+    const policy = parseRobots('User-agent: *\nDisallow: /secret', USER_AGENT)
+    await expect(f.fetchText('https://example.com/secret.txt', policy)).rejects.toBeInstanceOf(
+      RobotsDisallowedError,
+    )
+    expect(impl).not.toHaveBeenCalled()
+  })
+})
+
 describe('sha256Json', () => {
   it('is stable under key order', () => {
     expect(sha256Json({ a: 1, b: [2, { c: 3, d: 4 }] })).toBe(
@@ -470,6 +495,7 @@ export function sha256Json(value: unknown): string {
 
 export type PoliteFetcher = {
   fetchJson(url: string, policy: RobotsPolicy | null): Promise<{ status: number; body: unknown }>
+  fetchText(url: string, policy: RobotsPolicy | null): Promise<{ status: number; body: string }>
 }
 
 export function createPoliteFetcher(
@@ -486,27 +512,38 @@ export function createPoliteFetcher(
   const minGapMs = 1000 / (opts.maxRps ?? 1)
   const lastRequestAt = new Map<string, number>()
 
+  // ONE politeness path for every request kind: robots gate, per-domain
+  // spacing, UA, retry with backoff. Body handling is the only variance.
+  async function politeRequest(url: string, policy: RobotsPolicy | null): Promise<Response> {
+    const u = new URL(url)
+    if (policy && !isPathAllowed(policy, u.pathname)) throw new RobotsDisallowedError(url)
+    const gapMs = Math.max(minGapMs, (policy?.crawlDelaySeconds ?? 0) * 1000)
+    const last = lastRequestAt.get(u.hostname)
+    if (last !== undefined) {
+      const wait = last + gapMs - now()
+      if (wait > 0) await sleep(wait)
+    }
+    let lastStatus = 0
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await sleep(1000 * 2 ** attempt) // exponential backoff
+      lastRequestAt.set(u.hostname, now())
+      const res = await fetchImpl(url, { headers: { 'user-agent': USER_AGENT } })
+      lastStatus = res.status
+      if (res.status >= 500 || res.status === 429) continue
+      return res
+    }
+    throw new Error(`fetch failed after 3 attempts (${lastStatus}): ${url}`)
+  }
+
   return {
     async fetchJson(url, policy) {
-      const u = new URL(url)
-      if (policy && !isPathAllowed(policy, u.pathname)) throw new RobotsDisallowedError(url)
-      const gapMs = Math.max(minGapMs, (policy?.crawlDelaySeconds ?? 0) * 1000)
-      const last = lastRequestAt.get(u.hostname)
-      if (last !== undefined) {
-        const wait = last + gapMs - now()
-        if (wait > 0) await sleep(wait)
-      }
-      let lastStatus = 0
-      for (let attempt = 0; attempt < 3; attempt++) {
-        if (attempt > 0) await sleep(1000 * 2 ** attempt) // exponential backoff
-        lastRequestAt.set(u.hostname, now())
-        const res = await fetchImpl(url, { headers: { 'user-agent': USER_AGENT } })
-        lastStatus = res.status
-        if (res.status >= 500 || res.status === 429) continue
-        const body = await res.json().catch(() => null)
-        return { status: res.status, body }
-      }
-      throw new Error(`fetch failed after 3 attempts (${lastStatus}): ${url}`)
+      const res = await politeRequest(url, policy)
+      const body = await res.json().catch(() => null)
+      return { status: res.status, body }
+    },
+    async fetchText(url, policy) {
+      const res = await politeRequest(url, policy)
+      return { status: res.status, body: await res.text() }
     },
   }
 }
@@ -1096,13 +1133,17 @@ git checkout plan4-integration && git merge --no-ff task/p4-4-adapter-extract
 **Files:**
 - Create: `apps/worker/src/jobs/scrape.ts`, `apps/worker/test/scrape.test.ts`, `apps/worker/src/smoke.ts`
 - Modify: `apps/worker/src/index.ts` (register + schedule), `apps/worker/package.json` (deps `@aptv2/scrapers`, `@aptv2/pipeline`, `@aptv2/schema`; script `"smoke": "tsx src/smoke.ts"`), `apps/worker/vitest.config.ts` (DB-test shape: setupFiles + `fileParallelism: false`, testTimeout 20000), create `apps/worker/test/setup.ts` (root-.env dotenv, same as pipeline's)
-- Modify: `packages/pipeline/src/upsert.ts` (two SANCTIONED amendments below), `packages/pipeline/src/index.ts` (export new helpers), `packages/pipeline/test/upsert.test.ts` (cover them)
+- Modify: `packages/pipeline/src/upsert.ts` (THREE sanctioned amendments below), `packages/pipeline/src/index.ts` (export new helpers), `packages/pipeline/test/upsert.test.ts` (cover them)
 
 **Interfaces:**
 - Consumes: everything Tasks 1–4 produced; `createBoss` and the job-registration pattern in `apps/worker/src/index.ts`; `upsertProcessedUnits`.
 - Produces:
-  - Pipeline amendments: `upsertProcessedUnits(pool, units, opts?: { sourceRef?: number })` — when `sourceRef` is given, listings rows get `source_ref = $sourceRef`; and neighborhood resolution falls back to spatial lookup: when the by-name lookup misses (scraped rows carry `neighborhood: ""`), resolve `SELECT id, name FROM neighborhoods WHERE ST_Covers(boundary, ST_SetSRID(ST_MakePoint($lng,$lat),4326)::geography) LIMIT 1` and use that row's id (listing's `neighborhood_id`) — display name comes from the join at read time, so no schema change.
-  - `PoliteFetcher` gains a `fetchText(url: string, policy: RobotsPolicy | null): Promise<{ status: number; body: string }>` sibling (same politeness path — robots check, rate limit, UA, backoff — returning text instead of parsed JSON), implemented in `packages/scrapers/src/politeness.ts` with unit tests mirroring the `fetchJson` ones; `runScrape` uses it for robots.txt refresh.
+  - Pipeline amendments: `upsertProcessedUnits(pool, units, opts?: { sourceRef?: number })` — when `sourceRef` is given, listings rows get `source_ref = $sourceRef`; **price history must ACCUMULATE on the conflict path** (see below); and neighborhood resolution falls back to spatial lookup: when the by-name lookup misses (scraped rows carry `neighborhood: ""`), resolve `SELECT id, name FROM neighborhoods WHERE ST_Covers(boundary, ST_SetSRID(ST_MakePoint($lng,$lat),4326)::geography) LIMIT 1` and use that row's id (listing's `neighborhood_id`) — display name comes from the join at read time, so no schema change.
+  - **Price-history accumulation (the third upsert amendment — review must-fix).** Plan 3's `DO UPDATE SET events = EXCLUDED.events, price_history = EXCLUDED.price_history, price_changes = EXCLUDED.price_changes` overwrites history, and every scrape emits a fresh single `first_listed` event — so a live rent change would ERASE the old price instead of recording it, killing the product's price-history spine. Replace those three clauses with append semantics, all in SQL on the conflict path:
+    - `events`: `CASE WHEN listings.price_cents IS NOT NULL AND EXCLUDED.price_cents IS NOT NULL AND listings.price_cents <> EXCLUDED.price_cents THEN listings.events || jsonb_build_array(jsonb_build_object('at', to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), 'kind', CASE WHEN EXCLUDED.price_cents < listings.price_cents THEN 'price_drop' ELSE 'price_increase' END, 'from_cents', listings.price_cents, 'to_cents', EXCLUDED.price_cents, 'note', null)) ELSE listings.events END` — prior events always survive; a price change appends exactly one synthesized event; equal or either-side-null prices append nothing (null transitions are unclassifiable — the price columns still update).
+    - `price_history`: same CASE, appending `jsonb_build_object('at', <same timestamp expr>, 'from_cents', listings.price_cents, 'to_cents', EXCLUDED.price_cents)` to `listings.price_history`, else keep `listings.price_history`.
+    - `price_changes`: `jsonb_array_length(<the new price_history expression>)` — or simpler, recompute after the fact; implementer's choice, stated in the report.
+    - Note the asymmetry is deliberate: the INSERT path still uses the record's own events/history verbatim (seed rows author their full deterministic history), and the seed corpus re-run stays idempotent because seed prices never differ between runs — the existing "loads all 26 ... idempotent" test must stay green untouched.
   - `bumpConfirmed(pool, sourceRef: number, at: Date): Promise<number>` — hash short-circuit (spec §5.2): `UPDATE listings SET last_confirmed_at = $2 WHERE source_ref = $1 AND status <> 'gone'`, returns row count.
   - `sweepVanished(pool, sourceRef: number, seenCollapseKeys: string[]): Promise<{ staled: number; gone: number }>` — listings of this source NOT in `seenCollapseKeys`: `active → stale`; already `stale` → `gone` (one-cycle grace, spec §5.4); rows in the seen list that are `stale` come back to `active` (handled by the upsert's status write).
   - Worker job names: `SCRAPE = 'scrape'` (data `{ sourceId: number }`), `PROCESS = 'process-snapshot'` (data `{ snapshotId: number; sourceId: number }`).
@@ -1139,6 +1180,45 @@ describe('ingestion helpers', () => {
     )
     expect(rows[0].source_ref).toBe(src[0].id)
     expect(rows[0].name).toBe('Lake Eola Heights') // seed unit 1's coords sit in the Eola bbox
+  })
+
+  it('price history accumulates across upserts instead of being overwritten', async () => {
+    const base = {
+      ...buildSeedUnits(NOW)[0]!,
+      source_id: 'rentcafe___pricehist-1',
+      collapse_key: 'rentcafe:pricehist-1',
+      liberal_dedup_cluster: 'orlando:pricehist-1',
+      platform: 'rentcafe' as const,
+      data_provenance: 'scraped' as const,
+      advertised_rent_cents: 200000,
+      net_effective_monthly_cents: null,
+      concession_type: 'not_mentioned' as const,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: 200000, note: null }],
+    }
+    await upsertProcessedUnits(pool, [base])
+    // Second scrape cycle: rent dropped $150.
+    await upsertProcessedUnits(pool, [{
+      ...base,
+      advertised_rent_cents: 185000,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: 185000, note: null }],
+    }])
+    const { rows } = await pool.query(
+      `SELECT price_cents, events, price_history, price_changes FROM listings WHERE collapse_key = 'rentcafe:pricehist-1'`,
+    )
+    const r = rows[0]
+    expect(r.price_cents).toBe(185000)
+    const priceEvents = r.events.filter((e: { kind: string }) => e.kind === 'price_drop' || e.kind === 'price_increase')
+    expect(priceEvents).toHaveLength(1)
+    expect(priceEvents[0]).toMatchObject({ kind: 'price_drop', from_cents: 200000, to_cents: 185000 })
+    expect(r.events[0].kind).toBe('first_listed') // prior history survived
+    expect(r.price_history).toHaveLength(1)
+    expect(r.price_history[0]).toMatchObject({ from_cents: 200000, to_cents: 185000 })
+    expect(r.price_changes).toBe(1)
+    // Third cycle, unchanged price: nothing appended.
+    await upsertProcessedUnits(pool, [{ ...base, advertised_rent_cents: 185000 }])
+    const again = await pool.query(`SELECT events, price_changes FROM listings WHERE collapse_key = 'rentcafe:pricehist-1'`)
+    expect(again.rows[0].events).toHaveLength(r.events.length)
+    expect(again.rows[0].price_changes).toBe(1)
   })
 
   it('bumpConfirmed and sweepVanished implement the confirm/stale/gone ladder', async () => {
@@ -1303,12 +1383,9 @@ export async function runScrape(
     let policy = source.robots_policy
     try {
       const origin = new URL(source.website_url).origin
-      const res = await deps.fetcher.fetchJson(`${origin}/robots.txt`, null)
-      if (res.status === 200 && typeof res.body === 'string') policy = parseRobots(res.body, 'aptv2-research-bot')
+      const res = await deps.fetcher.fetchText(`${origin}/robots.txt`, null)
+      if (res.status === 200) policy = parseRobots(res.body, 'aptv2-research-bot')
     } catch { /* robots fetch failure keeps the stored policy — recorded below either way */ }
-    // NOTE: fetchJson parses JSON; robots.txt is text. Implementer: give PoliteFetcher a
-    // fetchText sibling (same politeness path, returns string) and use it here — add a
-    // covering unit test for fetchText in packages/scrapers mirroring the fetchJson ones.
 
     const snap = await rentcafeAdapter.fetch(source, deps.fetcher)
     const { rows: dup } = await pool.query(
