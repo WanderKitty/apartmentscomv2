@@ -2,7 +2,7 @@ import Link from "next/link";
 import { SearchBar } from "@/components/SearchBar";
 import { ParseEcho } from "@/components/ParseEcho";
 import { ListingCard } from "@/components/ListingCard";
-import { searchService } from "@/lib/mock-search";
+import { searchService } from "@/lib/search";
 
 const EXAMPLE_QUERIES = [
   "furnished 1br near Lake Eola under $2,000",

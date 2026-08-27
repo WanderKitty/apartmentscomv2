@@ -95,6 +95,12 @@ export interface SearchResult {
   listings: Listing[];
   parsed: ParsedQuery;
   totalCount: number;
+  timing: {
+    parseMs: number;
+    searchMs: number;
+    p50SearchMs: number;
+    corpus: number; // number of seeded listings searched
+  };
 }
 
 export interface SearchService {
