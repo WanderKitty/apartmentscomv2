@@ -197,3 +197,36 @@ describe('createHaikuEnricher', () => {
     }
   })
 })
+
+describe('enrichment guard: zero/absent lease term (prod incident 2026-08-28)', () => {
+  it('a concession with leaseMonths 0 is ignored — the unit still lands, math stays finite', async () => {
+    const payload = JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL('../../scrapers/fixtures/entrata-availability.json', import.meta.url)),
+        'utf8',
+      ),
+    )
+    await pool.query('DELETE FROM extract_cache')
+    const badEnricher = async () => ({
+      pets_allowed: 'not_mentioned' as const,
+      concession_text: '1 month free!',
+      concession: { kind: 'free_months' as const, months: 1, leaseMonths: 0 },
+      furnished: null,
+      short_term_ok: null,
+      summary: null,
+    })
+    const { units, failures } = await extractSnapshot(pool, {
+      snapshot: { id: 90, source_id: SOURCE.id, payload },
+      source: SOURCE, now: NOW, llm: badEnricher,
+    })
+    expect(failures).toEqual([])
+    expect(units.length).toBeGreaterThanOrEqual(1)
+    for (const u of units) {
+      expect(u.net_effective_monthly_cents === null || Number.isFinite(u.net_effective_monthly_cents)).toBe(true)
+      expect(u.concession_applies_lease_months).toBeNull()
+      expect(u.concession_type === 'none' || u.concession_type === 'not_mentioned' || u.concession_type === 'other').toBe(true)
+    }
+    // The concession TEXT still survives as a fact for display.
+    expect(units.some((u) => u.concession_text_raw === '1 month free!')).toBe(true)
+  })
+})

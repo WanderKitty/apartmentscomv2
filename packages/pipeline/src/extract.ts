@@ -56,7 +56,16 @@ export async function extractSnapshot(
       // rent/availability change doesn't bust an LLM result that's still valid.
       const unitHash = sha256Json({ texts, v: 2 })
       const enrichment = await cachedEnrichment(pool, unitHash, args.llm ?? null, texts)
-      const concession = enrichment?.concession ?? null
+      // Guard (prod incident 2026-08-28): a concession without a positive
+      // lease term cannot be amortized — netEffectiveMonthlyCents divides by
+      // leaseMonths, so 0 produced Infinity and failed every enriched unit.
+      // The enricher schema now forbids it, but cached rows and any future
+      // model drift must degrade to text-only here, never fail the unit.
+      const rawConcession = enrichment?.concession ?? null
+      const concession =
+        rawConcession && Number.isFinite(rawConcession.leaseMonths) && rawConcession.leaseMonths > 0
+          ? rawConcession
+          : null
       // Deterministic (no LLM): a stated lower "special" rate is a fact,
       // not an interpretation — takes priority over any LLM-derived concession.
       const specialRate =
@@ -177,9 +186,12 @@ const FURNISHED = ['furnished', 'unfurnished', 'optional', 'not_mentioned'] as c
 
 const ConcessionSchema = z
   .discriminatedUnion('kind', [
-    z.object({ kind: z.literal('free_weeks'), weeks: z.number(), leaseMonths: z.number() }),
-    z.object({ kind: z.literal('free_months'), months: z.number(), leaseMonths: z.number() }),
-    z.object({ kind: z.literal('flat_discount'), valueCents: z.number(), leaseMonths: z.number() }),
+    // leaseMonths must be a real, positive term: a concession whose lease
+    // term is unknown cannot be amortized honestly — the model must omit
+    // the structured concession (text still flows via concession_text).
+    z.object({ kind: z.literal('free_weeks'), weeks: z.number().positive(), leaseMonths: z.number().int().positive() }),
+    z.object({ kind: z.literal('free_months'), months: z.number().positive(), leaseMonths: z.number().int().positive() }),
+    z.object({ kind: z.literal('flat_discount'), valueCents: z.number().positive(), leaseMonths: z.number().int().positive() }),
   ])
   .nullable()
 
