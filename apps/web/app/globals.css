@@ -46,7 +46,12 @@
   --duration-entrance: 350ms;
 }
 
-/* No dark mode: the reference system has none for the public web. */
+/* No dark mode: the reference system has none for the public web.
+   color-scheme keeps browser Auto Dark Mode from force-inverting the
+   palette (which made the loading skeletons invisible). */
+:root {
+  color-scheme: only light;
+}
 body {
   background: var(--color-canvas);
   color: var(--color-ink);
@@ -94,11 +99,13 @@ body {
   }
 }
 .skeleton {
+  /* Base a step darker than surface-strong with a bright sheen: the
+     shimmer must stay legible on washed-out or tinted displays. */
   background: linear-gradient(
     100deg,
-    var(--color-surface-strong) 40%,
-    var(--color-surface-soft) 50%,
-    var(--color-surface-strong) 60%
+    var(--color-hairline-soft) 40%,
+    var(--color-canvas) 50%,
+    var(--color-hairline-soft) 60%
   );
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
