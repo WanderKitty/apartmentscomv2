@@ -199,7 +199,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
       floorplan_name: "C3", beds: 3, baths: 2, sqft: 1410,
       advertised_rent_cents: null, is_rent_not_mentioned: true,
       price_level: "not_listed", is_price_transparent: false,
-      concession_type: "none", // review ruling A4: explicit none everywhere there truly is none
+      concession_type: "none", // explicit none everywhere there truly is none
       pets_allowed: "not_mentioned",
       community_amenities: ["pool", "playground", "parking"],
       first_seen_at: iso(now, 9), last_confirmed_at: iso(now, 2),
@@ -245,7 +245,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
       events.push(ev(now, Math.max(2, Math.floor(daysListed / 3)), "price_drop", prior, rent));
     }
     events.push(ev(now, confHrs / 24, "confirmed", null, null));
-    // Deterministic concessions on two fixed rows (review ruling A3):
+    // Deterministic concessions on two fixed rows:
     // i===2 → 4 weeks free / 12 mo; i===12 → $1,000 flat discount / 12 mo.
     const concession =
       i === 2
@@ -276,7 +276,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
     }
     units.push(
       seedUnit(n, {
-        ...(concession ?? { concession_type: "none" as const }), // A4: explicit none where truly none
+        ...(concession ?? { concession_type: "none" as const }), // explicit none where truly none
         property_name: name, neighborhood: hood, latitude: lat, longitude: lng,
         address_line1: `${120 + i * 31} ${STREETS[hood]}`, zip: ZIPS[hood],
         beds, baths, sqft, is_sqft_not_mentioned: sqft === null,
@@ -338,6 +338,8 @@ function ev(now: Date, daysAgo: number, kind: ListingEvent["kind"], from: number
 
 const d = (c: number) => Math.round(c / 100);
 
+// Keep in sync with packages/search/src/postgres-search.ts's trueCostOf —
+// signatures differ (ProcessedUnitData vs Row) so extraction isn't worth it.
 function trueCostOf(u: ProcessedUnitData): TrueCost | null {
   if (u.advertised_rent_cents === null) return null;
   const fees: TrueCost["moveInFees"] = [];
@@ -347,18 +349,22 @@ function trueCostOf(u: ProcessedUnitData): TrueCost | null {
   if (u.pet_deposit_cents) fees.push({ label: "Pet deposit", amount: d(u.pet_deposit_cents) });
   const net = u.net_effective_monthly_cents ?? u.advertised_rent_cents;
   const lease = u.concession_applies_lease_months;
+  const advertisedMonthly = d(u.advertised_rent_cents);
+  const concessionMonthly = d(u.advertised_rent_cents - net);
   const label =
     u.concession_type === "free_weeks" && lease ? `${u.concession_free_weeks} wk free ÷ ${lease} mo`
     : u.concession_type === "free_months" && lease ? `${u.concession_free_months} mo free ÷ ${lease} mo`
     : u.concession_type === "flat_discount" && lease ? `$${d(u.concession_value_cents ?? 0)} off ÷ ${lease} mo`
+    // A net-effective discount without a structured concession record — e.g.
+    // a deterministic "special rate" fact — still deserves a label, not
+    // "No concessions".
+    : concessionMonthly > 0 ? "Special rate"
     : "No concessions";
-  const advertisedMonthly = d(u.advertised_rent_cents);
-  const concessionMonthly = d(u.advertised_rent_cents - net);
   return {
     advertisedMonthly,
     concessionLabel: label,
     concessionMonthly,
-    // Derived after rounding (A10) so displayed arithmetic can never drift $1.
+    // Derived after rounding so displayed arithmetic can never drift $1.
     netEffectiveMonthly: advertisedMonthly - concessionMonthly,
     moveInFees: fees,
   };

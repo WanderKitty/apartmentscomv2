@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ProcessedUnitDataSchema } from "./processed-unit-data";
+import { ProcessedUnitDataSchema, minimalUnit } from "./processed-unit-data";
 import { buildSeedUnits, toListing } from "./seed";
 
 const NOW = new Date("2026-08-27T12:00:00.000Z");
@@ -64,6 +64,30 @@ describe("seed data", () => {
 
     const others = units.filter((u) => u.property_name !== "Ridgewood House");
     expect(new Set(others.map((u) => u.address_line1)).size).toBe(others.length);
+  });
+
+  it("labels a net-effective discount without a structured concession as 'Special rate' via toListing", () => {
+    // Mirrors packages/search/src/postgres-search.test.ts's Row-based
+    // fixture — pinning that the schema-side trueCostOf (ProcessedUnitData
+    // input) stays in sync with the search-side one (Row input).
+    const u = ProcessedUnitDataSchema.parse({
+      ...minimalUnit(),
+      source_id: "seed___special-rate-schema-test",
+      collapse_key: "seed:special-rate-schema-test",
+      liberal_dedup_cluster: "orlando:special-rate-schema-test-unit",
+      advertised_rent_cents: 150000,
+      // Deterministic "special rate" fact (no LLM-parsed concession record):
+      // net_effective_monthly_cents set, concession_type stays generic.
+      net_effective_monthly_cents: 130000,
+      concession_type: "other",
+      concession_text_raw: "Special rate $1300/mo (advertised $1500/mo)",
+    });
+    const l = toListing(u, NOW);
+    expect(l.trueCost).not.toBeNull();
+    expect(l.trueCost!.concessionLabel).toBe("Special rate");
+    expect(l.trueCost!.advertisedMonthly).toBe(1500);
+    expect(l.trueCost!.concessionMonthly).toBe(200);
+    expect(l.trueCost!.netEffectiveMonthly).toBe(1300);
   });
 
   it("frequency normalization is consistent", () => {

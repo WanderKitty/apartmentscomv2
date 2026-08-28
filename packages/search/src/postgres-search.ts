@@ -153,6 +153,8 @@ type Row = {
 
 const d = (c: number) => Math.round(c / 100)
 
+// Keep in sync with packages/schema/src/seed.ts's trueCostOf — signatures
+// differ (Row vs ProcessedUnitData) so extraction isn't worth it.
 function trueCostOf(row: Row): TrueCost | null {
   if (row.price_cents === null) return null
   const fees = row.move_in_fees.map((f) => ({ label: f.label, amount: d(f.amount_cents) }))
