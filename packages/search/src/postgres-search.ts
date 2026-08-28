@@ -38,6 +38,7 @@ FROM (
     l.trust_score::float8 AS trust_score,
     u.beds::float8 AS beds, u.baths::float8 AS baths, u.sqft,
     u.amenities AS unit_amenities, u.image_url,
+    ST_Y(l.location::geometry) AS latitude, ST_X(l.location::geometry) AS longitude,
     p.name AS property_name, p.address_line1, p.city, p.state, p.zip,
     p.amenities AS community_amenities,
     n.name AS neighborhood_name,
@@ -88,6 +89,7 @@ SELECT
   l.trust_score::float8 AS trust_score,
   u.beds::float8 AS beds, u.baths::float8 AS baths, u.sqft,
   u.amenities AS unit_amenities, u.image_url,
+  ST_Y(l.location::geometry) AS latitude, ST_X(l.location::geometry) AS longitude,
   p.name AS property_name, p.address_line1, p.city, p.state, p.zip,
   p.amenities AS community_amenities,
   n.name AS neighborhood_name,
@@ -138,6 +140,8 @@ type Row = {
   sqft: number | null
   unit_amenities: string[]
   image_url: string | null
+  latitude: number
+  longitude: number
   property_name: string
   address_line1: string
   city: string
@@ -188,6 +192,8 @@ function rowToListing(row: Row, now: Date): Listing {
     propertyName: row.property_name,
     neighborhood: row.neighborhood_name ?? '',
     address: `${row.address_line1}, ${row.city}, ${row.state} ${row.zip}`,
+    latitude: row.latitude,
+    longitude: row.longitude,
     beds: row.beds,
     baths: row.baths,
     sqft: row.sqft,

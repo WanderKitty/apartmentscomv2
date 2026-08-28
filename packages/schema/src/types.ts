@@ -41,6 +41,8 @@ export interface Listing {
   propertyName: string;
   neighborhood: string;
   address: string;
+  latitude: number;
+  longitude: number;
   beds: number; // 0 = studio
   baths: number;
   sqft: number | null;

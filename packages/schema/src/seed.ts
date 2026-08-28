@@ -374,6 +374,8 @@ export function toListing(u: ProcessedUnitData, now: Date): Listing {
     propertyName: u.property_name,
     neighborhood: u.neighborhood,
     address: `${u.address_line1}, ${u.city}, ${u.state} ${u.zip}`,
+    latitude: u.latitude,
+    longitude: u.longitude,
     beds: u.beds, baths: u.baths, sqft: u.sqft,
     price: u.advertised_rent_cents === null ? null : d(u.advertised_rent_cents),
     priceIsStartingAt: u.price_level === "floorplan_starting_at",
