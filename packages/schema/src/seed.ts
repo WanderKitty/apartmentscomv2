@@ -379,6 +379,7 @@ export function toListing(u: ProcessedUnitData, now: Date): Listing {
     propertyId: u.collapse_key,
     propertyName: u.property_name,
     neighborhood: u.neighborhood,
+    city: u.city,
     address: `${u.address_line1}, ${u.city}, ${u.state} ${u.zip}`,
     beds: u.beds, baths: u.baths, sqft: u.sqft,
     price: u.advertised_rent_cents === null ? null : d(u.advertised_rent_cents),

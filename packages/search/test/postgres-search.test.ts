@@ -303,6 +303,7 @@ describe('postgres SearchService', () => {
     for (const l of r.listings) {
       expect(l.address).toMatch(/Tampa/)
       expect(l.beds).toBe(2) // combines with the exact-bed hard filter
+      expect(l.city).toBe('Tampa') // city threaded through the Row mapper (Plan 6 Task 4)
     }
     expect(r.listings.some((l) => l.propertyName === 'Tampa Test Property' && l.beds === 2)).toBe(true)
     expect(r.listings.some((l) => l.beds === 1)).toBe(false) // Tampa 1bd excluded by beds
