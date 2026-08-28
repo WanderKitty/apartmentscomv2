@@ -39,6 +39,13 @@ export type DiscoverCliDeps = {
   now?: () => Date
   /** Defaults to `discovery-report-<date>.json` in the current working directory. */
   reportPath?: string
+  /**
+   * How many HOSTS to verify concurrently (default 1 = the original
+   * sequential runner). Candidates on the same host always run sequentially
+   * within one worker — per-domain politeness is preserved by construction,
+   * so raising this only overlaps DIFFERENT sites' verifications.
+   */
+  concurrency?: number
 }
 
 export type DiscoverCliResult = {
@@ -63,7 +70,7 @@ export async function runDiscoverCli(candidatesPath: string, deps: DiscoverCliDe
   const raw = JSON.parse(await readFile(candidatesPath, 'utf8'))
   const candidates: Candidate[] = CandidatesFileSchema.parse(raw)
 
-  const results: VerifyResult[] = []
+  const results: VerifyResult[] = new Array(candidates.length)
   const tally: Record<VerifyVerdict, number> = Object.fromEntries(ALL_VERDICTS.map((v) => [v, 0])) as Record<
     VerifyVerdict,
     number
@@ -72,20 +79,55 @@ export async function runDiscoverCli(candidatesPath: string, deps: DiscoverCliDe
   // cost exactly ONE robots.txt fetch, not N.
   const robotsCache: RobotsCache = new Map()
 
-  // Sequential by construction: each candidate is fully awaited (robots →
-  // ... → up to 4 requests) before the next one starts.
+  // Nominatim is a single shared 1 req/s resource — serialize it globally
+  // regardless of candidate concurrency (chain pattern from the supervised
+  // fast-run experiments).
+  let geoChain: Promise<unknown> = Promise.resolve()
+  const rawGeocode = deps.geocode
+  const geocode: GeocodeFn | undefined = rawGeocode
+    ? (q) => {
+        const p = geoChain.then(() => rawGeocode!(q))
+        geoChain = p.catch(() => {})
+        return p as ReturnType<GeocodeFn>
+      }
+    : undefined
+
+  // Host-keyed concurrency: the compliance posture is per-DOMAIN (≤1 req/s
+  // toward any single site, robots first, ≤4 requests per candidate) —
+  // none of which constrains candidates on DIFFERENT hosts. Each worker
+  // owns ONE host's whole candidate queue, so a host's requests stay
+  // sequential (naturally paced; the politeness fetcher's per-host token
+  // bucket is the backstop) and the robotsCache never sees concurrent
+  // access to the same key. concurrency=1 reproduces the original fully
+  // sequential runner.
+  const concurrency = Math.max(1, deps.concurrency ?? 1)
+  const hostQueues = new Map<string, number[]>()
   for (let i = 0; i < candidates.length; i++) {
-    const candidate = candidates[i]!
-    const r = await verifyCandidate(candidate, deps.fetcher, {
-      pool: deps.pool,
-      llm: deps.llm,
-      geocode: deps.geocode,
-      robotsCache,
-    })
-    results.push(r)
-    tally[r.verdict]++
-    log(`[${i + 1}/${candidates.length}] ${r.url} -> ${r.verdict} (${r.detail})`)
+    const host = new URL(candidates[i]!.url).hostname
+    hostQueues.set(host, [...(hostQueues.get(host) ?? []), i])
   }
+  const hosts = [...hostQueues.keys()]
+  let nextHost = 0
+  let completed = 0
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const host = hosts[nextHost++]
+      if (host === undefined) return
+      for (const i of hostQueues.get(host)!) {
+        const r = await verifyCandidate(candidates[i]!, deps.fetcher, {
+          pool: deps.pool,
+          llm: deps.llm,
+          geocode,
+          robotsCache,
+        })
+        results[i] = r
+        tally[r.verdict]++
+        completed++
+        log(`[${completed}/${candidates.length}] ${r.url} -> ${r.verdict} (${r.detail})`)
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, hosts.length) }, () => worker()))
 
   const dateStr = now().toISOString().slice(0, 10)
   const reportPath = deps.reportPath ?? path.join(PACKAGE_DIR, `discovery-report-${dateStr}.json`)
@@ -112,9 +154,13 @@ if (isMain) {
   const { createNominatimGeocoder } = await import('./geocode')
   const { createPoliteFetcher } = await import('@aptv2/scrapers')
 
-  const candidatesArg = process.argv[2]
+  const args = process.argv.slice(2)
+  const concurrencyIdx = args.indexOf('--concurrency')
+  const concurrency =
+    concurrencyIdx >= 0 && Number(args[concurrencyIdx + 1]) > 0 ? Number(args[concurrencyIdx + 1]) : 8
+  const candidatesArg = args.find((a, i) => !a.startsWith('--') && i !== concurrencyIdx + 1)
   if (!candidatesArg) {
-    console.error('usage: discover-cli <candidates-file.json>')
+    console.error('usage: discover-cli <candidates-file.json> [--concurrency N]')
     process.exit(1)
   }
   const pool = getPool()
@@ -125,6 +171,7 @@ if (isMain) {
     fetcher: createPoliteFetcher({ retry429: false }),
     llm: createHaikuFactsExtractor() ?? undefined,
     geocode: createNominatimGeocoder(pool),
+    concurrency,
   })
   console.log(`Report written to ${result.reportPath}`)
   await closePool()
