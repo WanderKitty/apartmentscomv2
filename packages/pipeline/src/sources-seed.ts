@@ -7,6 +7,7 @@ export const SOURCES_SEED: Array<{
   website_url: string
   endpoint_config: SourceRow['endpoint_config']
   rate_limit_rps: number
+  enabled: boolean
 }> = [
   {
     platform: 'entrata',
@@ -25,6 +26,7 @@ export const SOURCES_SEED: Array<{
       },
     },
     rate_limit_rps: 1,
+    enabled: true,
   },
   {
     platform: 'entrata',
@@ -43,6 +45,7 @@ export const SOURCES_SEED: Array<{
       },
     },
     rate_limit_rps: 1,
+    enabled: true,
   },
   {
     platform: 'entrata',
@@ -61,6 +64,8 @@ export const SOURCES_SEED: Array<{
       },
     },
     rate_limit_rps: 1,
+    // embedded variant not yet parsed — follow-up extractor planned
+    enabled: false,
   },
   {
     platform: 'entrata',
@@ -79,6 +84,8 @@ export const SOURCES_SEED: Array<{
       },
     },
     rate_limit_rps: 1,
+    // embedded variant not yet parsed — follow-up extractor planned
+    enabled: false,
   },
 ]
 
@@ -86,13 +93,13 @@ export async function seedSources(pool: pg.Pool): Promise<number> {
   let n = 0
   for (const s of SOURCES_SEED) {
     await pool.query(
-      `INSERT INTO sources (platform, name, website_url, endpoint_config, rate_limit_rps)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO sources (platform, name, website_url, endpoint_config, rate_limit_rps, enabled)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (website_url) DO UPDATE SET
          name = EXCLUDED.name, endpoint_config = EXCLUDED.endpoint_config,
-         rate_limit_rps = EXCLUDED.rate_limit_rps
+         rate_limit_rps = EXCLUDED.rate_limit_rps, enabled = EXCLUDED.enabled
        RETURNING id`,
-      [s.platform, s.name, s.website_url, JSON.stringify(s.endpoint_config), s.rate_limit_rps],
+      [s.platform, s.name, s.website_url, JSON.stringify(s.endpoint_config), s.rate_limit_rps, s.enabled],
     )
     n++
   }

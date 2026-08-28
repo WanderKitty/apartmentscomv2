@@ -30,7 +30,11 @@ const SOURCE: SourceRow = {
 }
 
 describe('parseEntrataPayload (golden, REST shape — Current Orlando fixture)', () => {
-  const units = parseEntrataPayload(restPayload)
+  // Called with a baseUrl, exactly as extract.ts calls it — required to
+  // exercise the detailUrl absolutization (CRITICAL regression: relative
+  // paths must resolve, not be passed straight into a `z.string().url()`
+  // schema field downstream).
+  const units = parseEntrataPayload(restPayload, SOURCE.endpoint_config.endpoint_url)
 
   it('parses all 15 floorplans with sane fields', () => {
     expect(units.length).toBe(15)
@@ -46,20 +50,26 @@ describe('parseEntrataPayload (golden, REST shape — Current Orlando fixture)',
 
   it('maps a known floorplan (ID 2127, "The Studio") faithfully', () => {
     const studio = units[0]!
-    expect(studio.externalId).toBe('2127')
+    expect(studio.externalId).toBe('annual-2127') // "annual" is the lease-term group's slug
     expect(studio.floorplanName).toBe('The Studio')
     expect(studio.beds).toBe(0)
     expect(studio.baths).toBe(1)
     expect(studio.sqft).toBe(433)
     expect(studio.rentCents).toBe(175000) // $1750 -> cents
+    expect(studio.rentSpecialCents).toBeNull() // no rentspecial for this floorplan
     expect(studio.availableOn).toBeNull() // no availability field on this endpoint
     expect(studio.marketingTexts).toEqual([]) // banner/disclaimer/description all "" for this floorplan
+    // Composed from fp.slug, not featured_image.link (which is the
+    // image-attachment page, not the floorplan's own page).
+    expect(studio.detailUrl).toBe('https://example.com/local-floor-plans/the-studio/')
   })
 
-  it('carries free-text marketing strings when the payload has them (floorplan ID 2133, "The Two")', () => {
+  it('carries free text and a discounted special rate (floorplan ID 2133, "The Two")', () => {
     const theTwo = units[8]!
-    expect(theTwo.externalId).toBe('2133')
+    expect(theTwo.externalId).toBe('annual-2133')
     expect(theTwo.marketingTexts).toContain('Limited Availability')
+    expect(theTwo.rentCents).toBe(135000) // $1350
+    expect(theTwo.rentSpecialCents).toBe(126700) // $1267 special rate
   })
 
   it('throws a named error on a wrong-shaped payload', () => {
@@ -77,7 +87,8 @@ describe('parseEntrataPayload (golden, embedded shape — Society Orlando captur
   const embeddedPayload = JSON.parse(
     (embeddedHtml.match(/<script[^>]*id="jd-fp-data-script-app"[^>]*>([\s\S]*?)<\/script>/) ?? ['', ''])[1]!,
   )
-  const units = parseEntrataPayload(embeddedPayload)
+  const SOCIETY_ENDPOINT = 'https://societyorlando.com/floorplans/'
+  const units = parseEntrataPayload(embeddedPayload, SOCIETY_ENDPOINT)
 
   it('parses all 137 units with sane fields, distinct per-unit external ids', () => {
     expect(units.length).toBe(137)
@@ -90,7 +101,7 @@ describe('parseEntrataPayload (golden, embedded shape — Society Orlando captur
     expect(new Set(units.map((u) => u.externalId)).size).toBe(units.length)
   })
 
-  it('maps a known unit (apartment #1822-B) faithfully', () => {
+  it('maps a known unit (apartment #1822-B) faithfully, with an absolute detailUrl', () => {
     const unit = units.find((u) => u.unitNumber === '1822-B')!
     expect(unit.externalId).toBe('8756877')
     expect(unit.floorplanName).toBe('Rent-By-Bedroom | 3 Bed - D1')
@@ -98,9 +109,15 @@ describe('parseEntrataPayload (golden, embedded shape — Society Orlando captur
     expect(unit.baths).toBe(3)
     expect(unit.sqft).toBe(484)
     expect(unit.rentCents).toBe(130500) // $1305 -> cents
+    expect(unit.rentSpecialCents).toBeNull() // this shape has no separate special-rate field
     expect(unit.availableOn).toBe('2024-03-18')
     expect(unit.marketingTexts).toContain(
       'Specials Available, Up to 2 Months Free on Select Homes! Contact Us For More Details.',
+    )
+    // CRITICAL regression: permalink ("/floorplans/unit-.../") is site-relative
+    // in the real capture — must resolve against the base, not pass through raw.
+    expect(unit.detailUrl).toBe(
+      'https://societyorlando.com/floorplans/unit-4fad4c8f34c45ca364a20e1c2f67ef67/',
     )
   })
 })

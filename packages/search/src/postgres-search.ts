@@ -154,13 +154,18 @@ function trueCostOf(row: Row): TrueCost | null {
   const net = row.net_effective_rent_cents ?? row.price_cents
   const c = row.concession
   const lease = c?.lease_months
+  const advertisedMonthly = d(row.price_cents)
+  const concessionMonthly = d(row.price_cents - net)
   const label =
     c?.type === 'free_weeks' && lease ? `${c.free_weeks} wk free ÷ ${lease} mo`
     : c?.type === 'free_months' && lease ? `${c.free_months} mo free ÷ ${lease} mo`
     : c?.type === 'flat_discount' && lease ? `$${d(c.value_cents ?? 0)} off ÷ ${lease} mo`
+    // A net-effective discount without a structured concession record — e.g.
+    // a deterministic "special rate" fact (spec-adjacent to entrata ingestion)
+    // rather than an LLM-parsed concession — still deserves a label, not
+    // "No concessions".
+    : concessionMonthly > 0 ? 'Special rate'
     : 'No concessions'
-  const advertisedMonthly = d(row.price_cents)
-  const concessionMonthly = d(row.price_cents - net)
   return {
     advertisedMonthly,
     concessionLabel: label,
