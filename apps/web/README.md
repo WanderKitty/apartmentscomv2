@@ -122,3 +122,19 @@ pnpm --filter @aptv2/web test             # vitest (vitest run)
 pnpm --filter @aptv2/web build            # production build
 pnpm --filter @aptv2/schema gen:schema-docs  # regenerate packages/schema/docs/schema.md
 ```
+
+## Deployment & teardown
+
+Production runs on the free tier: Vercel (this app, auto-deploys on master),
+Neon Postgres + PostGIS (pooled connections), and GitHub Actions (CI on every
+push; scraping 3×/day via `scrape.yml`; AI evals on master merges and nightly
+via `evals.yml`). The production corpus is real scraped listings only —
+`pnpm --filter @aptv2/pipeline seed:prod` seeds geography and the source
+registry, never demo listings.
+
+To wind the demo down:
+
+1. `gh workflow disable scrape.yml` and `gh workflow disable evals.yml`
+2. Rotate or revoke the Anthropic API key in the Anthropic console
+3. Vercel and Neon idle at $0 — deleting them is optional
+4. To resurrect: re-enable the workflows and re-add the key
