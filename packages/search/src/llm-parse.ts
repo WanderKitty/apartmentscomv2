@@ -80,6 +80,19 @@ export async function parseQueryWith(
     ]);
     const out = response.parsed_output;
     if (!out) return fallback();
+    // A successful parse that recognized NOTHING (no filters, no residual)
+    // must not become an unconstrained match-everything query — gibberish
+    // would return the whole corpus. Run the raw text as keywords instead,
+    // exactly like the keyword rung's fail-open ladder (§6.1).
+    const recognizedAnything =
+      out.neighborhoods.length > 0 ||
+      out.price_max_dollars !== null ||
+      out.beds_min !== null ||
+      out.beds_max !== null ||
+      out.furnished !== null ||
+      out.short_term !== null ||
+      out.amenities.length > 0 ||
+      out.residual_text.trim() !== "";
     const parsed: ParsedQuery = {
       neighborhoods: out.neighborhoods,
       priceMax: out.price_max_dollars,
@@ -88,8 +101,8 @@ export async function parseQueryWith(
       furnished: out.furnished,
       shortTerm: out.short_term,
       amenities: out.amenities,
-      residualText: out.residual_text,
-      failedOpen: false,
+      residualText: recognizedAnything ? out.residual_text : raw.trim(),
+      failedOpen: !recognizedAnything && raw.trim().length > 0,
       parseSource: "llm",
       parseMs: Math.round(performance.now() - started),
     };
