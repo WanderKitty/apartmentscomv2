@@ -6,7 +6,8 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded branch pushes are cancelled; master runs always finish.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
   test:
@@ -63,6 +64,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
       - run: pnpm --filter @aptv2/web exec playwright install --with-deps chromium
       # Builds the app, seeds the dedicated aptv2_e2e database, and runs
       # specs against `next start` with no ANTHROPIC_API_KEY (keyword rung).

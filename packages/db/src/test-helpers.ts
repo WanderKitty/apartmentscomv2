@@ -43,7 +43,7 @@ export async function resetDatabaseAtUrl(url: string): Promise<void> {
  */
 export async function usePerPackageTestDb(suffix: string): Promise<void> {
   const base = process.env.TEST_DATABASE_URL
-  if (!base) return
+  if (!base || base.endsWith(`_${suffix}`)) return // idempotent across reruns
   const dbName = `${new URL(base).pathname.slice(1)}_${suffix}`
   process.env.TEST_DATABASE_URL = await ensureDatabase(base, dbName)
 }

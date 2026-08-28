@@ -31,9 +31,13 @@ export default defineConfig({
     timeout: 240_000,
     reuseExistingServer: !process.env.CI,
     env: {
-      TEST_DATABASE_URL: baseDb,
       DATABASE_URL: e2eDb.toString(),
+      // Blank every Anthropic credential source so parsing cannot go live on
+      // a developer machine. Empty key → the SDK fails client-side with no
+      // network call and parseQuery falls back (verified against sdk 0.121;
+      // the "keyword fallback" badge assertion guards this end-to-end).
       ANTHROPIC_API_KEY: "",
+      ANTHROPIC_AUTH_TOKEN: "",
     },
   },
 });

@@ -47,9 +47,9 @@ describe.skipIf(!KEY)('extraction sampling judged by claude-sonnet-5', () => {
       fileURLToPath(new URL('../../scrapers/fixtures/entrata-embedded.html', import.meta.url)),
       'utf8',
     )
-    const embeddedPayload = JSON.parse(
-      (embeddedHtml.match(/<script[^>]*id="jd-fp-data-script-app"[^>]*>([\s\S]*?)<\/script>/) ?? ['', ''])[1]!,
-    )
+    const embeddedMatch = embeddedHtml.match(/<script[^>]*id="jd-fp-data-script-app"[^>]*>([\s\S]*?)<\/script>/)
+    if (!embeddedMatch) throw new Error('embedded floor-plan script tag not found in fixture')
+    const embeddedPayload = JSON.parse(embeddedMatch[1]!)
     const restUnits = uniqueByTexts(parseEntrataPayload(restPayload).filter(hasTexts)).slice(0, 8)
     const embeddedUnits = uniqueByTexts(parseEntrataPayload(embeddedPayload).filter(hasTexts)).slice(0, 8)
     // Sample floor per shape; raise the caps as the corpus grows.

@@ -6,7 +6,8 @@ on:
 
 concurrency:
   group: evals-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a live eval run (paid API calls); queue instead.
+  cancel-in-progress: false
 
 jobs:
   evals:

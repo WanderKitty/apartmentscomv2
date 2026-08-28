@@ -5,7 +5,7 @@ import { GOLDENS, scoreGoldens } from '../src/goldens'
 // The keyword rung is what production degrades to whenever the LLM is
 // unavailable — it deserves its own regression floor. Deterministic and
 // key-free, so it runs in every CI pass. Thresholds sit just below the
-// measured rates (2026-08-28: nbhd .98, price .96, beds .90/.90,
+// measured rates (2026-08-27: nbhd .98, price .96, beds .90/.90,
 // furnished 1.0, shortTerm 1.0, amenities .98); known misses are
 // word-number counts ("two bedroom") and rarer price phrasings.
 describe('golden parse floor for the keyword fallback rung', () => {
