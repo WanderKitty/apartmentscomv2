@@ -1,0 +1,21 @@
+{
+  "name": "@aptv2/evals",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit" },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.121.0",
+    "@aptv2/db": "workspace:*",
+    "@aptv2/pipeline": "workspace:*",
+    "@aptv2/schema": "workspace:*",
+    "@aptv2/scrapers": "workspace:*",
+    "@aptv2/search": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "dotenv": "^16.4.0",
+    "pg": "^8.13.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0",
+    "zod": "^4.4.3"
+  }
+}
