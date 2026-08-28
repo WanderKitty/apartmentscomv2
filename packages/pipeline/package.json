@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "@aptv2/pipeline",
   "private": true,
   "type": "module",
@@ -7,7 +7,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "seed": "tsx src/seed-cli.ts",
-    "seed:sources": "tsx src/seed-sources-cli.ts"
+    "seed:sources": "tsx src/seed-sources-cli.ts",
+    "seed:prod": "tsx src/seed-prod-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
