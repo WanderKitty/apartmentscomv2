@@ -9,3 +9,5 @@ dist/
 .playwright-mcp/
 .claude/
 demo-page.png
+.vercel
+.env*
