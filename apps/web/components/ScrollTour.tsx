@@ -21,10 +21,10 @@ const STEPS = [
     body: "“Starting at” prices get flagged, and specials are turned into the net rent you’d actually pay — advertised rent, concession, net effective, all shown as plain arithmetic.",
   },
   {
-    img: "/tour/tour-map.png",
-    alt: "Map showing exactly where a listing is",
-    title: "See exactly where it is",
-    body: "Every listing is pinned on a map with its real address — no “contact us for location”. When you’re ready, one link takes you to the property’s own site to apply. No middlemen, no fees.",
+    img: "/tour/tour-history.png",
+    alt: "A listing's price history with a recorded price drop and days on market",
+    title: "We remember every price",
+    body: "Listing sites show today's price; we keep the receipts. Every drop, every increase, and how long a unit has really been sitting — so you know if that “deal” is new or just relisted. When you’re ready, one link takes you straight to the property to apply.",
   },
 ];
 

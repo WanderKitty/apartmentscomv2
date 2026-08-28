@@ -2,10 +2,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const TABS = [
-  { href: "/", label: "Search" },
-  { href: "/admin", label: "Admin" },
-] as const;
+// Admin stays reachable by URL for operators; it's just not advertised.
+const TABS = [{ href: "/", label: "Search" }] as const;
 
 /** Product tabs per the reference doc: nav-link type, 2px ink underline on the active tab. */
 export function NavLinks() {

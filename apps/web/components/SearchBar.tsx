@@ -87,7 +87,7 @@ export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
             setActive(-1);
           }}
           onKeyDown={onKeyDown}
-          placeholder="Try “furnished 1br near Lake Eola under $2,000”"
+          placeholder="Try “furnished 1 bed under $2,500”"
           aria-label="Search Orlando apartments"
           role="combobox"
           aria-expanded={showList}
