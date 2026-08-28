@@ -140,8 +140,8 @@ type Row = {
   sqft: number | null
   unit_amenities: string[]
   image_url: string | null
-  latitude: number
-  longitude: number
+  latitude: number | null
+  longitude: number | null
   property_name: string
   address_line1: string
   city: string

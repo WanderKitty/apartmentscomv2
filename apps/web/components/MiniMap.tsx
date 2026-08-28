@@ -5,7 +5,7 @@ import "leaflet/dist/leaflet.css";
 // Rausch teardrop pin, dropped in with a small settle animation (the
 // keyframes live in globals.css and are disabled under reduced motion).
 const PIN_HTML = `
-<div class="pin-drop" aria-hidden>
+<div class="pin-drop" aria-hidden="true">
   <svg width="36" height="44" viewBox="0 0 36 44" fill="none">
     <path d="M18 1C9.2 1 2 8.1 2 16.9 2 28.4 18 43 18 43s16-14.6 16-26.1C34 8.1 26.8 1 18 1Z"
           fill="#ff385c" stroke="#ffffff" stroke-width="2"/>
@@ -30,6 +30,7 @@ export function MiniMap({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let map: import("leaflet").Map | undefined;
@@ -46,8 +47,10 @@ export function MiniMap({
       // the design system (CARTO's basemaps now require an API key).
       const esri =
         "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_{layer}/MapServer/tile/{z}/{y}/{x}";
-      const attribution = "Tiles &copy; Esri";
-      L.tileLayer(esri.replace("{layer}", "Base"), { attribution, maxZoom: 16 }).addTo(map);
+      const base = L.tileLayer(esri.replace("{layer}", "Base"), {
+        attribution: "Tiles &copy; Esri",
+        maxZoom: 16,
+      }).addTo(map);
       L.tileLayer(esri.replace("{layer}", "Reference"), { attribution: "", maxZoom: 16 }).addTo(map);
       L.marker([latitude, longitude], {
         icon: L.divIcon({
@@ -56,18 +59,30 @@ export function MiniMap({
           iconSize: [36, 44],
           iconAnchor: [18, 42],
         }),
-        alt: propertyName,
         keyboard: false,
       }).addTo(map);
-      map.whenReady(() => {
+      // 'load' = every visible base tile painted; the skeleton drops then.
+      base.once("load", () => {
         if (!cancelled) setReady(true);
       });
-    })();
+    })().catch(() => {
+      // Leaflet chunk failed to load (offline, blocked CDN): stop the
+      // shimmer and say so instead of spinning forever.
+      if (!cancelled) setFailed(true);
+    });
     return () => {
       cancelled = true;
       map?.remove();
     };
   }, [latitude, longitude, propertyName]);
+
+  if (failed) {
+    return (
+      <div className="flex h-64 items-center justify-center rounded-card border border-hairline-soft bg-surface-soft md:h-72">
+        <p className="text-[13px] text-muted">Map couldn’t load.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="relative isolate z-0 h-64 overflow-hidden rounded-card border border-hairline-soft md:h-72">
@@ -76,7 +91,7 @@ export function MiniMap({
           own classes to the mount div below, so React must never rewrite
           that element's className after mount. */}
       <div
-        role="img"
+        role="region"
         aria-label={`Map showing the location of ${propertyName}`}
         className={`size-full transition-opacity duration-[var(--duration-entrance)] ${ready ? "opacity-100" : "opacity-0"}`}
       >

@@ -234,6 +234,23 @@ describe('postgres SearchService', () => {
     expect(card.longitude).toBeCloseTo(-81.3707, 4)
   })
 
+  it('a row without a stored location serves null coordinates, not a crash', async () => {
+    // listings.location is nullable; no writer produces NULL today, so pin
+    // the read path directly.
+    await pool.query(`UPDATE listings SET location = NULL WHERE collapse_key = 'entrata:image-test'`)
+    try {
+      const l = await service().getListing('entrata___image-test')
+      expect(l).not.toBeNull()
+      expect(l!.latitude).toBeNull()
+      expect(l!.longitude).toBeNull()
+    } finally {
+      await pool.query(
+        `UPDATE listings SET location = ST_SetSRID(ST_MakePoint(-81.3707, 28.5461), 4326)::geography
+         WHERE collapse_key = 'entrata:image-test'`,
+      )
+    }
+  })
+
   it('labels a net-effective discount without a structured concession as "Special rate"', async () => {
     const specialRateUnit = ProcessedUnitDataSchema.parse({
       ...minimalUnit(),

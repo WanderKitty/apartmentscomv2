@@ -133,20 +133,22 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
             </section>
           )}
 
-          <section className="mt-8 border-t border-hairline-soft pt-6">
-            <h2 className="text-[16px] font-semibold text-ink">Location</h2>
-            <p className="mt-1 text-[14px] text-muted">
-              {listing.address}
-              {listing.neighborhood && ` · ${listing.neighborhood}`}
-            </p>
-            <div className="mt-3">
-              <MiniMap
-                latitude={listing.latitude}
-                longitude={listing.longitude}
-                propertyName={listing.propertyName}
-              />
-            </div>
-          </section>
+          {listing.latitude !== null && listing.longitude !== null && (
+            <section className="mt-8 border-t border-hairline-soft pt-6">
+              <h2 className="text-[16px] font-semibold text-ink">Location</h2>
+              <p className="mt-1 text-[14px] text-muted">
+                {listing.address}
+                {listing.neighborhood && ` · ${listing.neighborhood}`}
+              </p>
+              <div className="mt-3">
+                <MiniMap
+                  latitude={listing.latitude}
+                  longitude={listing.longitude}
+                  propertyName={listing.propertyName}
+                />
+              </div>
+            </section>
+          )}
 
           <section className="mt-8 border-t border-hairline-soft pt-6">
             <h2 className="text-[16px] font-semibold text-ink">
