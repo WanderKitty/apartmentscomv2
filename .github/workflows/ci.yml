@@ -27,5 +27,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r typecheck
-      - run: pnpm -r --if-present test
+      # DB-backed suites share one aptv2_test database and each resets it;
+      # concurrent packages race on DROP SCHEMA / CREATE EXTENSION. Serialize.
+      - run: pnpm -r --workspace-concurrency=1 --if-present test
       - run: pnpm --filter @aptv2/web build
