@@ -22,6 +22,7 @@ export type SpherexxCard = {
   unitsAvailable: number
   pricedOn: string | null
   detailPath: string | null
+  imageUrl: string | null
 }
 
 const CARD_RE = /<article class="floorplans__floorplan[^"]*"([^>]*)>([\s\S]*?)<\/article>/g
@@ -35,6 +36,25 @@ const num = (v: string | null): number | null => {
   if (v === null || v.trim() === '') return null
   const n = Number(v)
   return Number.isFinite(n) ? n : null
+}
+
+// The card's <noscript> thumbnail points at a resize proxy
+// (…/img/thumbnail.aspx?p=<path>); the p param is the direct CDN path to
+// the full image. Unwrap it; relative srcs and the silhouette placeholder
+// mean "no image".
+const cardImage = (body: string): string | null => {
+  const m = body.match(/<noscript>\s*<img[^>]*src="([^"]*)"/)
+  if (!m) return null
+  const src = m[1]!.replace(/&amp;/g, '&')
+  if (!/^https?:\/\//i.test(src) || src.includes('default-silhouette')) return null
+  try {
+    const u = new URL(src)
+    if (!u.pathname.endsWith('/img/thumbnail.aspx')) return src
+    const p = u.searchParams.get('p')
+    return p ? new URL(p, u.origin).toString() : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -69,6 +89,7 @@ export function extractSpherexxCards(html: string): SpherexxCard[] {
       unitsAvailable: num(attr(attrs, 'units-available')) ?? 0,
       pricedOn: attr(attrs, 'date'),
       detailPath: detail ? detail[1]! : null,
+      imageUrl: cardImage(body),
     })
   }
   if (cards.length === 0) {
@@ -126,7 +147,8 @@ export function parseSpherexxPayload(payload: unknown, baseUrl?: string): Entrat
       marketingTexts: marketing,
       detailUrl:
         c.detailPath && baseUrl ? new URL(c.detailPath, baseUrl).toString() : (c.detailPath ?? null),
-      imageUrl: null, // the card's <noscript> thumbnail is a resize proxy; skip until needed
+      // Stored payloads from before this field existed lack it — null then.
+      imageUrl: typeof c.imageUrl === 'string' ? c.imageUrl : null,
     })
   }
   return units
