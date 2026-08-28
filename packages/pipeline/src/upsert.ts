@@ -102,13 +102,15 @@ export async function upsertProcessedUnits(
     const kind = u.unit_number ? 'unit' : 'floorplan'
     const externalId = u.unit_number ?? u.floorplan_name ?? sourceExternalId
     const { rows: unit } = await pool.query(
-      `INSERT INTO units (property_id, kind, external_id, name, beds, baths, sqft, amenities)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO units (property_id, kind, external_id, name, beds, baths, sqft, amenities, image_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (property_id, kind, external_id) DO UPDATE SET
          beds = EXCLUDED.beds, baths = EXCLUDED.baths, sqft = EXCLUDED.sqft,
-         amenities = EXCLUDED.amenities
+         amenities = EXCLUDED.amenities,
+         -- COALESCE: a cycle without an image must not erase a known one.
+         image_url = COALESCE(EXCLUDED.image_url, units.image_url)
        RETURNING id`,
-      [propertyId, kind, externalId, u.floorplan_name, u.beds, u.baths, u.sqft, u.unit_amenities],
+      [propertyId, kind, externalId, u.floorplan_name, u.beds, u.baths, u.sqft, u.unit_amenities, u.image_url],
     )
     const unitId: number = unit[0]!.id
     unitIds.add(unitId)

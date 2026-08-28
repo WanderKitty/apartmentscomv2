@@ -42,19 +42,38 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
       </Link>
 
       {/* Photos are linked from the source site, never rehosted (spec §7). */}
-      <div className="mt-4 flex h-64 flex-col items-center justify-center gap-2 rounded-card bg-surface-strong md:h-80">
-        <span className="text-[8px] font-bold uppercase tracking-[0.32px] text-muted-soft">
-          Photos stay at the source
-        </span>
-        <a
-          href={listing.sourceUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[14px] font-medium text-ink underline"
-        >
-          View photos on the property site ↗
-        </a>
-      </div>
+      {listing.photoUrl ? (
+        <div className="relative mt-4 h-64 overflow-hidden rounded-card border border-hairline-soft bg-white md:h-80">
+          <img
+            src={listing.photoUrl}
+            alt={`${listing.propertyName} floorplan`}
+            referrerPolicy="no-referrer"
+            className="img-enter size-full object-contain"
+          />
+          <a
+            href={listing.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute bottom-3 right-3 rounded-full border border-hairline bg-canvas/90 px-3 py-1.5 text-[13px] font-medium text-ink shadow-tier backdrop-blur-sm transition-colors duration-[var(--duration-micro)] hover:bg-canvas"
+          >
+            More photos at the source ↗
+          </a>
+        </div>
+      ) : (
+        <div className="mt-4 flex h-64 flex-col items-center justify-center gap-2 rounded-card bg-surface-strong md:h-80">
+          <span className="text-[8px] font-bold uppercase tracking-[0.32px] text-muted-soft">
+            Photos stay at the source
+          </span>
+          <a
+            href={listing.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[14px] font-medium text-ink underline"
+          >
+            View photos on the property site ↗
+          </a>
+        </div>
+      )}
 
       <div className="mt-8 flex flex-col gap-10 md:flex-row">
         {/* Left column — 64% */}
@@ -63,7 +82,8 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
             {listing.propertyName}
           </h1>
           <p className="mt-1 text-[14px] text-muted">
-            {listing.address} · {listing.neighborhood}
+            {listing.address}
+            {listing.neighborhood && ` · ${listing.neighborhood}`}
           </p>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">

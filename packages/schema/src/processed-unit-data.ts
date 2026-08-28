@@ -160,6 +160,18 @@ export const ProcessedUnitDataSchema = z.object({
     .nullable()
     .default(null),
 
+  // ---- MEDIA ----------------------------------------------------------
+  // Floorplan photo/render or layout diagram, hotlinked from the source
+  // (never rehosted). Property gallery photos are a separate future field.
+  // http(s) only: this value lands in an <img src> sink, and z.string().url()
+  // alone accepts javascript:/data: schemes.
+  image_url: z
+    .string()
+    .url()
+    .refine((u) => /^https?:/i.test(u), "image_url must be http(s)")
+    .nullable()
+    .default(null),
+
   // ---- GENERATED ------------------------------------------------------
   generated_summary: z.string().nullable().default(null),
   events: z.array(ListingEventSchema).default([]),

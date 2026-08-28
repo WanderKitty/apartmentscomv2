@@ -23,7 +23,27 @@ describe("ProcessedUnitDataSchema", () => {
     expect(() => ProcessedUnitDataSchema.parse(bad)).toThrow();
   });
 
-  it("field count is ~90 (93 as authored)", () => {
+  it("carries an optional floorplan/unit image_url, defaulting to null", () => {
+    expect(ProcessedUnitDataSchema.parse(minimalUnit()).image_url).toBeNull();
+    const withImage = {
+      ...minimalUnit(),
+      image_url: "https://example.com/floorplan.jpg",
+    };
+    expect(ProcessedUnitDataSchema.parse(withImage).image_url).toBe(
+      "https://example.com/floorplan.jpg",
+    );
+    const bad = { ...minimalUnit(), image_url: "not-a-url" };
+    expect(() => ProcessedUnitDataSchema.parse(bad)).toThrow();
+  });
+
+  it("rejects non-http(s) image_url schemes (img-src sink hardening)", () => {
+    for (const url of ["javascript:alert(1)", "data:text/html,hi"]) {
+      const bad = { ...minimalUnit(), image_url: url };
+      expect(() => ProcessedUnitDataSchema.parse(bad)).toThrow();
+    }
+  });
+
+  it("field count is ~90 (94 as authored)", () => {
     const n = Object.keys(ProcessedUnitDataSchema.shape).length;
     expect(n).toBeGreaterThanOrEqual(60);
     // Sanity rail, not a target — never trim real fields to fit it.

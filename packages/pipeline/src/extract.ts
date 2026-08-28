@@ -131,6 +131,10 @@ export async function extractSnapshot(
         furnished: enrichment?.furnished ?? 'not_mentioned',
         short_term_ok: enrichment?.short_term_ok ?? null,
         generated_summary: enrichment?.summary ?? null,
+        // Fail-open: an image is cosmetic — a bad scheme (the schema only
+        // admits http(s) into an <img src> sink) degrades to null, never
+        // fails the unit.
+        image_url: ru.imageUrl && /^https?:/i.test(ru.imageUrl) ? ru.imageUrl : null,
         available_on: ru.availableOn,
         is_available_now: ru.availableOn !== null && ru.availableOn <= nowIso.slice(0, 10),
         first_seen_at: nowIso, // upsert keeps the earlier first_listed_at on conflict

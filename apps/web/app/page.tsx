@@ -1,7 +1,9 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { SearchBar } from "@/components/SearchBar";
 import { ParseEcho } from "@/components/ParseEcho";
 import { ListingCard } from "@/components/ListingCard";
+import { ResultsSkeleton } from "@/components/ResultsSkeleton";
 import { SeedBanner } from "@/components/SeedBanner";
 import { searchService } from "@/lib/search";
 
@@ -73,6 +75,29 @@ export default async function Home(props: PageProps<"/">) {
     );
   }
 
+  return (
+    <div className="mx-auto w-full max-w-[880px] px-6 pb-16 pt-8">
+      <SearchBar defaultValue={q} />
+
+      {/* The shell (search bar) paints immediately; the search itself —
+          LLM parse + SQL — streams in behind the skeleton. Keyed by query
+          so a new search re-shows the fallback instead of the stale page. */}
+      <Suspense key={`${q}|${debug}`} fallback={<ResultsSkeleton />}>
+        <SearchResults q={q} debug={debug} now={now} />
+      </Suspense>
+    </div>
+  );
+}
+
+async function SearchResults({
+  q,
+  debug,
+  now,
+}: {
+  q: string;
+  debug: boolean;
+  now: Date;
+}) {
   const { listings, parsed, totalCount, timing, relaxationHints } =
     await searchService.search(q);
   const debugToggleHref = debug
@@ -80,9 +105,7 @@ export default async function Home(props: PageProps<"/">) {
     : `/?q=${encodeURIComponent(q)}&debug=1`;
 
   return (
-    <div className="mx-auto w-full max-w-[880px] px-6 pb-16 pt-8">
-      <SearchBar defaultValue={q} />
-
+    <div>
       <div className="mt-4">
         <SeedBanner seed={timing.corpusSeed} scraped={timing.corpusScraped} />
       </div>
@@ -136,12 +159,13 @@ export default async function Home(props: PageProps<"/">) {
         </div>
       ) : (
         <ul className="divide-y divide-hairline-soft">
-          {listings.map((listing) => (
+          {listings.map((listing, i) => (
             <ListingCard
               key={listing.id}
               listing={listing}
               now={now}
               debug={debug}
+              enterIndex={i}
             />
           ))}
         </ul>

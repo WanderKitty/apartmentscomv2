@@ -195,6 +195,34 @@ describe('postgres SearchService', () => {
 
   // Last: inserts an extra listing, which would otherwise shift the
   // corpus/totalCount assertions the earlier tests depend on.
+  it('surfaces the unit image_url as photoUrl in search and getListing', async () => {
+    const withImage = ProcessedUnitDataSchema.parse({
+      ...minimalUnit(),
+      source_id: `entrata${SOURCE_ID_SEPARATOR}image-test`,
+      platform: 'entrata',
+      collapse_key: 'entrata:image-test',
+      liberal_dedup_cluster: 'orlando:image-test-unit',
+      source_url: 'https://example.com/image-test',
+      data_provenance: 'scraped',
+      property_name: 'Image Fixture',
+      address_line1: '1 Image Way',
+      city: 'Orlando', state: 'FL', zip: '32801',
+      neighborhood: 'Lake Eola Heights',
+      latitude: 28.5461, longitude: -81.3707,
+      beds: 1, baths: 1,
+      advertised_rent_cents: 140000,
+      price_level: 'unit', is_price_transparent: true,
+      image_url: 'https://example.com/floorplans/image-test.jpg',
+      first_seen_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(),
+    })
+    await upsertProcessedUnits(pool, [withImage])
+    const l = await service().getListing('entrata___image-test')
+    expect(l!.photoUrl).toBe('https://example.com/floorplans/image-test.jpg')
+    const r = await service().search('Image Fixture')
+    const card = r.listings.find((x) => x.propertyName === 'Image Fixture')!
+    expect(card.photoUrl).toBe('https://example.com/floorplans/image-test.jpg')
+  })
+
   it('labels a net-effective discount without a structured concession as "Special rate"', async () => {
     const specialRateUnit = ProcessedUnitDataSchema.parse({
       ...minimalUnit(),
