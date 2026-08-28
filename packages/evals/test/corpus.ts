@@ -6,11 +6,6 @@ import { buildSeedUnits } from '@aptv2/schema'
 import { seedNeighborhoods, upsertProcessedUnits, extractSnapshot } from '@aptv2/pipeline'
 import type { SourceRow } from '@aptv2/scrapers'
 
-/**
- * Load the full local corpus into the test database: the 26 seed listings
- * plus the captured Entrata REST fixture extracted with the LLM disabled.
- * Deterministic and key-free.
- */
 export async function loadFullCorpus(pool: Pool, now: Date): Promise<void> {
   await resetTestDb(pool)
   await seedNeighborhoods(pool)

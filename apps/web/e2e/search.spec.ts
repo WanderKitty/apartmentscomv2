@@ -22,7 +22,6 @@ test("canonical demo query returns 2 listings with honest parse chips", async ({
   await searchPage.search(CANONICAL_QUERY);
   await expect(page).toHaveURL(/\?q=/);
 
-  // The parse echo shows every hard filter the query became.
   await expect(page.getByText("What we understood")).toBeVisible();
   for (const chip of [
     "Lake Eola Heights",
@@ -33,13 +32,11 @@ test("canonical demo query returns 2 listings with honest parse chips", async ({
   ]) {
     await expect(searchPage.chip(chip)).toBeVisible();
   }
-  // No API key in e2e → the fail-open keyword rung, surfaced honestly.
   await expect(page.getByText("keyword fallback")).toBeVisible();
 
   await expect(page.getByText(/2 listings · ranked by relevance/)).toBeVisible();
   await expect(searchPage.cards).toHaveCount(2);
 
-  // Seed provenance is disclosed.
   await expect(page.getByText(/Corpus: 26 seeded demo listings/)).toBeVisible();
 });
 
@@ -75,8 +72,6 @@ test("zero results offer relaxation hints that keep their promise", async ({
   await hint.click();
   await expect(searchPage.cards.first()).toBeVisible();
   const shown = await searchPage.cards.count();
-  // Cards may merge cross-platform duplicates, but a hint must never
-  // overpromise what the click delivers.
   expect(shown).toBeGreaterThan(0);
   expect(shown).toBeLessThanOrEqual(promised);
 });
