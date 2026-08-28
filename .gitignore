@@ -1,15 +1,12 @@
 node_modules/
 .next/
 dist/
-.env
-.env.deploy
-.env*.local
 *.tsbuildinfo
 .superpowers/
 .playwright-mcp/
 playwright-report/
 test-results/
 .claude/
-demo-page.png
 .vercel
 .env*
+!.env.example
