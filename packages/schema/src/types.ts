@@ -39,7 +39,7 @@ export interface Listing {
   propertyId: string;
   propertyName: string;
   neighborhood: string;
-  /** Display fallback when neighborhood is empty (Plan 6 Task 4). */
+  /** Display fallback when neighborhood is empty. */
   city: string;
   address: string;
   /** Null when the stored row has no location (listings.location is nullable);
@@ -62,7 +62,7 @@ export interface Listing {
   firstListedAt: string; // ISO datetime
   lastConfirmedAt: string; // ISO datetime — drives freshness
   priceHistory: PriceChange[];
-  /** Linked from the source site, never rehosted (§7). */
+  /** Linked from the source site, never rehosted. */
   photoUrl: string | null;
   sourceUrl: string;
   platform: string;
@@ -82,7 +82,7 @@ export interface Listing {
   lng: number | null;
 }
 
-/** Output of the query-parse step (§6.1). */
+/** Output of the query-parse step. */
 export interface ParsedQuery {
   neighborhoods: string[];
   /** Closed enum (FLORIDA_CITIES). Neighborhood aliases take precedence

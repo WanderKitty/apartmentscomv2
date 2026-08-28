@@ -7,7 +7,7 @@ const DOT: Record<string, string> = {
 };
 
 /**
- * The "confirmed Xh ago" stamp (spec §6.4) — styled like the reference
+ * The "confirmed Xh ago" stamp — styled like the reference
  * system's pill badge: white, fully rounded, single shadow tier.
  */
 export function FreshnessBadge({

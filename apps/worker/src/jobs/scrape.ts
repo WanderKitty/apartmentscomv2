@@ -12,7 +12,7 @@ import {
 export const SCRAPE = 'scrape'
 export const PROCESS = 'process-snapshot'
 // Internal-only queue: the cron trigger that fans scrape jobs out to every
-// enabled source (see registerIngestionJobs's pg-boss-v10 note below).
+// enabled source (see registerIngestionJobs).
 const SCRAPE_SWEEP = 'scrape-sweep'
 
 async function loadSource(pool: pg.Pool, id: number): Promise<SourceRow> {
@@ -21,7 +21,7 @@ async function loadSource(pool: pg.Pool, id: number): Promise<SourceRow> {
   return rows[0] as SourceRow
 }
 
-/** Stage 2 (spec §5.2). Returns { unchanged, snapshotId, runId }. Throws on fetch failure AFTER recording the failed run. */
+/** Scrape stage. Returns { unchanged, snapshotId, runId }. Throws on fetch failure AFTER recording the failed run. */
 export async function runScrape(
   pool: pg.Pool,
   deps: { fetcher: PoliteFetcher },
@@ -44,10 +44,9 @@ export async function runScrape(
       // Robots fetch failure keeps the stored policy — recorded below either way.
       console.warn(`[scrape] robots.txt refresh failed for source ${sourceId}, using stored policy:`, (e as Error).message)
     }
-    // The adapter fetch MUST be gated by the policy we just refreshed, not
-    // the stale row loaded above — otherwise a first-ever scrape (stored
-    // policy null) runs ungated, and a newly published Disallow/Crawl-delay
-    // is ignored for a full cycle.
+    // Gate the adapter fetch on the refreshed policy, not the stale row —
+    // otherwise a first-ever scrape runs ungated and a newly published
+    // Disallow is ignored for a full cycle.
     source.robots_policy = policy
 
     const snap = await (source.endpoint_config.mode === 'spherexx' ? spherexxAdapter : entrataAdapter).fetch(
@@ -55,29 +54,24 @@ export async function runScrape(
       deps.fetcher,
     )
     // Only a FULLY processed prior snapshot licenses the short-circuit: a
-    // 'partial' match means the last look at this exact content missed some
-    // units, so identical content must be given another chance to extract
-    // cleanly rather than being waved through as "already seen" (prod
-    // incident 2026-08-28).
+    // 'partial' match missed some units, so identical content must get
+    // another chance to extract cleanly.
     const { rows: dup } = await pool.query(
       `SELECT id FROM raw_snapshots WHERE source_id = $1 AND content_hash = $2 AND processing_status = 'processed' LIMIT 1`,
       [sourceId, snap.content_hash],
     )
     const unchanged = dup.length > 0
-    // Storage economy: an unchanged row is an audit marker, not a second
-    // copy of the (potentially megabyte-sized) payload — it points at the
-    // matched prior snapshot instead. Replay is unaffected: only
-    // non-skipped rows are ever replayed.
+    // An unchanged row is an audit marker pointing at the matched prior
+    // snapshot, not a second copy of a potentially megabyte-sized payload.
     const storedPayload = unchanged ? { unchanged_ref: dup[0]!.id } : snap.payload
     const { rows: inserted } = await pool.query(
       `INSERT INTO raw_snapshots (source_id, content_hash, payload, processing_status)
        VALUES ($1, $2, $3, $4) RETURNING id`,
       [sourceId, snap.content_hash, JSON.stringify(storedPayload), unchanged ? 'skipped_unchanged' : 'pending'],
     )
-    // hash short-circuit still confirms every active listing is live; the
-    // confirmed count IS this run's listings_found — leaving it at the
-    // default 0 makes the admin delta read as a phantom mass-delisting on
-    // the (dominant) steady-state unchanged path.
+    // The hash short-circuit still confirms every active listing is live;
+    // that count is this run's listings_found, else the admin delta reads
+    // as a phantom mass-delisting on the steady-state unchanged path.
     const confirmedCount = unchanged ? await bumpConfirmed(pool, sourceId, new Date()) : null
     await pool.query(
       `UPDATE sources SET last_scraped_at = now(), failure_streak = 0, robots_policy = $2 WHERE id = $1`,
@@ -94,7 +88,7 @@ export async function runScrape(
       [runId, (e as Error).message],
     )
     await pool.query(`UPDATE sources SET failure_streak = failure_streak + 1 WHERE id = $1`, [sourceId])
-    throw e // pg-boss retries with backoff; the failure is recorded, not swallowed (spec §5)
+    throw e // pg-boss retries with backoff; the failure is recorded, not swallowed
   }
 }
 
@@ -113,10 +107,9 @@ export async function runProcess(
     })
     await upsertProcessedUnits(pool, units, { sourceRef: data.sourceId })
 
-    // A snapshot with any extraction failures (or zero extracted units) is
-    // an incomplete view of what's really live — sweeping against it would
-    // stale/gone listings that simply failed to parse THIS cycle, not
-    // listings that actually vanished from the source.
+    // A snapshot with extraction failures (or zero units) is an incomplete
+    // view — sweeping against it would stale listings that merely failed
+    // to parse this cycle.
     if (failures.length > 0 || units.length === 0) {
       console.warn(
         `[process] skipping sweepVanished for source ${data.sourceId}: ` +
@@ -134,10 +127,8 @@ export async function runProcess(
       [data.snapshotId, failures.length > 0 ? 'partial' : 'processed'],
     )
 
-    // listings_changed isn't computed yet (no change-detection pass exists)
-    // — always 0 for now. listings_found is the count of
-    // units this cycle successfully extracted (and upserted), regardless
-    // of failures.
+    // listings_changed isn't computed yet — always 0. listings_found is
+    // the count of units this cycle successfully extracted.
     if (failures.length > 0) {
       const summary = `${failures.length} unit(s) failed extraction: ${failures.map((f) => f.externalId).join(', ')}`
       await pool.query(
@@ -146,9 +137,8 @@ export async function runProcess(
       )
       console.error(`[process] ${summary}`)
     } else {
-      // Explicit 'ok' (not just left over from the fetch stage) so a
-      // pg-boss retry that later succeeds wins the status back from a
-      // 'failed' left by an earlier crashed attempt.
+      // Explicit 'ok' so a pg-boss retry that later succeeds wins the
+      // status back from an earlier crashed attempt's 'failed'.
       await pool.query(
         `UPDATE scrape_runs SET listings_found = $2, listings_changed = 0, status = 'ok' WHERE id = $1`,
         [data.runId, units.length],
@@ -161,9 +151,8 @@ export async function runProcess(
       `UPDATE raw_snapshots SET processing_status = 'failed', error = $2 WHERE id = $1`,
       [data.snapshotId, (e as Error).message],
     )
-    // A whole-snapshot crash (e.g. payload shape error) must not leave the
-    // run row 'ok' from the fetch stage — the admin page would say
-    // everything is fine while processing silently failed.
+    // A whole-snapshot crash must not leave the run row 'ok' from the
+    // fetch stage while processing silently failed.
     await pool.query(
       `UPDATE scrape_runs SET status = 'failed', error = $2, finished_at = now() WHERE id = $1`,
       [data.runId, (e as Error).message],
@@ -174,17 +163,11 @@ export async function runProcess(
 }
 
 /**
- * pg-boss v10 keys its `schedule` table by queue name alone (PRIMARY KEY
- * (name), FK to the queue table — see node_modules/pg-boss/src/plans.js's
- * createTableSchedule/schedule()), so a single queue can carry only ONE
- * cron schedule with ONE fixed data payload. Per-source cron schedules on
- * the shared `scrape` queue therefore can't each carry their own
- * `{ sourceId }` the way the brief's literal per-source `boss.schedule`
- * loop assumes. Fallback used here (behavior-equivalent, per the brief's
- * note): one schedule on an internal `scrape-sweep` queue, 3×/day, whose
- * handler re-reads the enabled sources and `boss.send`s an individual
- * `scrape` job for each — fan-out happens at run time, not at schedule
- * registration time, so newly enabled sources are picked up automatically.
+ * pg-boss v10 allows one cron schedule (with one fixed payload) per queue,
+ * so per-source schedules on the shared `scrape` queue can't carry their
+ * own `{ sourceId }`. Instead one 3×/day schedule on `scrape-sweep`
+ * fans out an individual scrape job per enabled source at run time, so
+ * newly enabled sources are picked up automatically.
  */
 export async function registerIngestionJobs(boss: PgBoss, pool: pg.Pool): Promise<void> {
   await boss.createQueue(SCRAPE)
@@ -206,6 +189,5 @@ export async function registerIngestionJobs(boss: PgBoss, pool: pg.Pool): Promis
     for (const s of sources) await boss.send(SCRAPE, { sourceId: s.id })
   })
 
-  // 3×/day (spec §5.2).
   await boss.schedule(SCRAPE_SWEEP, '0 6,14,22 * * *', {})
 }

@@ -6,11 +6,9 @@ import { createPoliteFetcher } from '@aptv2/scrapers'
 import { runProcess, runScrape } from './jobs/scrape'
 import { runScrapePool } from './scrape-pool'
 
-// The entry point a hosted cron (GitHub Actions, Plan 5) invokes instead of
-// the long-lived pg-boss process: scrape every enabled source, then (if
-// changed) process it, never letting one source's failure stop the rest —
-// each failure is already recorded in scrape_runs/failure_streak by
-// runScrape/runProcess, so this CLI just logs and moves on. Sources run
+// The entry point the hosted cron invokes instead of the long-lived
+// pg-boss process: scrape every enabled source, then (if changed) process
+// it, never letting one source's failure stop the rest. Sources run
 // concurrently across hostnames (bounded by runScrapePool); same-host
 // sources stay sequential so the politeness gate is never raced.
 
@@ -42,7 +40,6 @@ const { succeeded, failed } = await runScrapePool(sources, async (source) => {
 })
 
 console.log(`[scrape-all] done: ${succeeded} ok, ${failed} failed, ${sources.length} total`)
-// Tri-state exit for CI cron: Actions treats any nonzero as a red run — for
-// a 2-source demo, ANY source failure should alert, not just total failure.
-// 0 = all ok, 2 = some failed, 1 = all failed.
+// Tri-state exit for CI cron: ANY source failure should alert, not just
+// total failure. 0 = all ok, 2 = some failed, 1 = all failed.
 process.exit(failed === 0 ? 0 : succeeded === 0 ? 1 : 2)

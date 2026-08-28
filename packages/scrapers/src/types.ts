@@ -10,7 +10,7 @@ export type SourceRow = {
   endpoint_config: {
     /** The availability endpoint this site's own frontend uses — a JSON API route, or the public page embedding the availability JSON. */
     endpoint_url: string
-    /** Which of entrata.ts's four payload shapes this source uses (packages/discovery's fingerprinter records this at registration time). Optional: sources seeded before this field existed (SOURCES_SEED) don't carry it — parseEntrataPayload self-detects shape from the payload regardless, so this is informational only, never required for scraping. */
+    /** Payload shape recorded by discovery's fingerprinter at registration. Informational only — parseEntrataPayload self-detects shape, and older seeded sources don't carry it. */
     mode?: 'rest' | 'embedded-v1' | 'embedded-v2' | 'rentpress' | 'spherexx'
     /** Property facts recorded at scouting (payloads rarely carry full address/geo). */
     property: {
@@ -33,7 +33,7 @@ export type RawSnapshotInput = {
   payload: unknown
 }
 
-/** One adapter per platform (spec §3.1): verbatim payloads, no business logic. */
+/** One adapter per platform: verbatim payloads, no business logic. */
 export type Adapter = {
   platform: string
   fetch(source: SourceRow, fetcher: PoliteFetcher): Promise<RawSnapshotInput>

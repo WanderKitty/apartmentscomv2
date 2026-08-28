@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import { isPathAllowed, type RobotsPolicy } from './robots'
 
-// Politeness is enforced centrally (spec §5.2): adapters cannot reach the
-// network except through this fetcher.
+// Politeness is enforced centrally: adapters cannot reach the network
+// except through this fetcher.
 
 export const USER_AGENT = 'aptv2-research-bot/0.1 (+mailto:volodolzh@gmail.com)'
 
@@ -31,11 +31,10 @@ export function sha256Json(value: unknown): string {
 export type FetchOpts = { maxRps?: number }
 
 /**
- * Coerces a `sources.rate_limit_rps` value (a `numeric` column — pg returns
- * it as a string) into a usable per-call `maxRps`. A non-finite or
- * non-positive value (0, negative, NaN, garbage) falls back to `undefined`
- * so the caller's default spacing applies, rather than silently disabling
- * rate limiting (`1000 / -1` is a negative gap, which floors to zero delay).
+ * Coerces `sources.rate_limit_rps` (pg returns numeric as a string) into a
+ * per-call `maxRps`. Non-finite or non-positive values fall back to
+ * `undefined` so default spacing applies — a negative value would otherwise
+ * compute a negative gap and silently disable rate limiting.
  */
 export function coerceMaxRps(value: unknown): number | undefined {
   const n = Number(value)
@@ -53,11 +52,9 @@ export function createPoliteFetcher(
     now?: () => number
     sleep?: (ms: number) => Promise<void>
     maxRps?: number
-    /** Default true (preserves prior behavior): a 429 is retried like a 5xx.
-     * Discovery's verifier passes false — retrying a rate-limited candidate
-     * site during a first-contact probe is impolite regardless of backoff;
-     * a 429 should fail the probe immediately (terminal), not be hammered 3
-     * times. 5xx retry behavior is unaffected either way. */
+    /** Default true: a 429 is retried like a 5xx. Discovery's verifier
+     * passes false — a rate-limited first-contact probe should fail
+     * immediately, not be retried. */
     retry429?: boolean
   } = {},
 ): PoliteFetcher {

@@ -2,13 +2,11 @@ import type pg from 'pg'
 import type { GeocodeFn } from './facts'
 
 // Nominatim (OpenStreetMap) geocode fallback, used ONLY when a candidate's
-// own site markup has no coordinates (facts.ts). Compliance (Global
-// Constraints): ≤1 req/s, a descriptive UA, and every result — including a
-// genuine MISS (no result found), cached as a NULL-coordinate row via
-// migration 0010 — cached in `geocode_cache` so the same query is never
-// re-geocoded, hit or miss. Attribution ("Geocoding data ©
-// OpenStreetMap contributors") is wired in apps/web's footer and README —
-// see the task report.
+// own site markup has no coordinates (facts.ts). Compliance: ≤1 req/s, a
+// descriptive UA, and every result — including a genuine MISS, stored as a
+// NULL-coordinate row — cached in `geocode_cache` so the same query is
+// never re-geocoded. Attribution ("Geocoding data © OpenStreetMap
+// contributors") is wired in apps/web's footer and README.
 
 const NOMINATIM_USER_AGENT = 'aptv2-research-bot/0.1 (+mailto:volodolzh@gmail.com)'
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'

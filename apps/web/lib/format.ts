@@ -5,7 +5,7 @@ const usd = new Intl.NumberFormat("en-US", {
 });
 
 export function formatPrice(price: number | null): string {
-  // Undisclosed prices are surfaced, never hidden (spec §6.2).
+  // Undisclosed prices are surfaced, never hidden.
   if (price === null) return "Price not listed";
   return usd.format(price);
 }
@@ -39,8 +39,8 @@ export function freshnessLabel(lastConfirmedAt: string, now: Date): string {
 
 export type FreshnessTier = "fresh" | "aging" | "stale";
 
-// Freshness decay half-life is ~3 days (spec §5.5); these tiers drive the
-// indicator dot color only, not ranking.
+// Freshness decay half-life is ~3 days; these tiers drive the indicator
+// dot color only, not ranking.
 export function freshnessTier(
   lastConfirmedAt: string,
   now: Date,
