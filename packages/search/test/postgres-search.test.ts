@@ -343,3 +343,106 @@ describe('postgres SearchService', () => {
     expect(dropCity.suggestedQuery).toBe('in Lake Eola Heights') // neighborhood priority: city never echoed here
   })
 })
+
+describe('sort semantics ("cheapest"/"smallest" are orderings, not filters)', () => {
+  it('"cheapest" alone returns the corpus in ascending price order, undisclosed last, no FTS gate', async () => {
+    const r = await service().search('cheapest')
+    expect(r.parsed.sort).toBe('price_asc')
+    expect(r.parsed.priceMax).toBeNull()
+    expect(r.parsed.residualText).toBe('')
+    expect(r.parsed.failedOpen).toBe(false)
+    expect(r.totalCount).toBeGreaterThan(5)
+    const prices = r.listings.map((l) => l.price)
+    const priced = prices.filter((p): p is number => p !== null)
+    expect(priced).toEqual([...priced].sort((a, b) => a - b))
+    expect(prices[prices.length - 1]).toBeNull() // undisclosed still last
+    expect(r.listings[0]!.price).toBe(Math.min(...priced))
+  })
+
+  it('"cheapest 2br" keeps the exact-beds filter AND the price ordering', async () => {
+    const r = await service().search('cheapest 2br')
+    expect(r.parsed.sort).toBe('price_asc')
+    expect(r.parsed.bedsMin).toBe(2)
+    for (const l of r.listings) expect(l.beds).toBe(2)
+    const priced = r.listings.map((l) => l.price).filter((p): p is number => p !== null)
+    expect(priced).toEqual([...priced].sort((a, b) => a - b))
+  })
+
+  it('"most expensive" sorts descending', async () => {
+    const r = await service().search('most expensive')
+    expect(r.parsed.sort).toBe('price_desc')
+    const priced = r.listings.map((l) => l.price).filter((p): p is number => p !== null)
+    expect(priced).toEqual([...priced].sort((a, b) => b - a))
+  })
+
+  it('"newest" sorts by first-listed date, newest first (undisclosed price still last)', async () => {
+    const r = await service().search('newest')
+    expect(r.parsed.sort).toBe('newest')
+    // The standing rule — undisclosed price sorts last — outranks every
+    // sort key, newest included: newest-descending within the priced set.
+    const priced = r.listings.filter((l) => l.price !== null)
+    const dates = priced.map((l) => Date.parse(l.firstListedAt))
+    expect(dates).toEqual([...dates].sort((a, b) => b - a))
+    const last = r.listings[r.listings.length - 1]!
+    if (r.listings.some((l) => l.price === null)) expect(last.price).toBeNull()
+  })
+
+  it('"smallest"/"biggest" sort by square footage; unknown sqft sorts last', async () => {
+    // A priced unit with NO sqft — unknown size must never win "smallest".
+    const noSqftUnit = ProcessedUnitDataSchema.parse({
+      ...minimalUnit(),
+      source_id: `entrata${SOURCE_ID_SEPARATOR}no-sqft-test`,
+      platform: 'entrata',
+      collapse_key: 'entrata:no-sqft-test',
+      liberal_dedup_cluster: 'orlando:no-sqft-test-unit',
+      source_url: 'https://example.com/no-sqft-test',
+      data_provenance: 'scraped',
+      property_name: 'No Sqft Fixture',
+      address_line1: '1 No Sqft Way',
+      city: 'Orlando', state: 'FL', zip: '32801',
+      neighborhood: 'Lake Eola Heights',
+      latitude: 28.5462, longitude: -81.3708,
+      beds: 1, baths: 1,
+      sqft: null, is_sqft_not_mentioned: true,
+      advertised_rent_cents: 150000,
+      price_level: 'unit', is_price_transparent: true,
+      first_seen_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(),
+    })
+    await upsertProcessedUnits(pool, [noSqftUnit])
+
+    const small = await service().search('smallest')
+    expect(small.parsed.sort).toBe('sqft_asc')
+    // Unknown size is last among the PRICED set (never first); undisclosed
+    // price still outranks everything as the standing last-place rule.
+    // (Two unknown-size fixtures exist by now — No Sqft above and the
+    // Special-rate unit — so assert on the PROPERTY, not one named unit.)
+    const pricedIdx = small.listings.map((l, i) => ({ l, i })).filter((x) => x.l.price !== null)
+    const firstUnknownSize = pricedIdx.find((x) => x.l.sqft === null)
+    expect(firstUnknownSize).toBeDefined()
+    for (const x of pricedIdx) if (x.i > firstUnknownSize!.i) expect(x.l.sqft).toBeNull()
+    for (const after of small.listings.slice(pricedIdx[pricedIdx.length - 1]!.i + 1)) {
+      expect(after.price).toBeNull()
+    }
+    const known = pricedIdx.filter((x) => x.l.sqft !== null).map((x) => x.l.sqft as number)
+    expect(known).toEqual([...known].sort((a, b) => a - b))
+
+    const big = await service().search('biggest')
+    expect(big.parsed.sort).toBe('sqft_desc')
+    const bigPricedIdx = big.listings.map((l, i) => ({ l, i })).filter((x) => x.l.price !== null)
+    const bigFirstUnknown = bigPricedIdx.find((x) => x.l.sqft === null)
+    expect(bigFirstUnknown).toBeDefined()
+    for (const x of bigPricedIdx) if (x.i > bigFirstUnknown!.i) expect(x.l.sqft).toBeNull()
+    for (const after of big.listings.slice(bigPricedIdx[bigPricedIdx.length - 1]!.i + 1)) {
+      expect(after.price).toBeNull()
+    }
+    const bigKnown = bigPricedIdx.filter((x) => x.l.sqft !== null).map((x) => x.l.sqft as number)
+    expect(bigKnown).toEqual([...bigKnown].sort((a, b) => b - a))
+  })
+
+  it('text affinity ranks parsed queries: the canonical query top result has positive textRelevance', async () => {
+    const r = await service().search(
+      'pet friendly 2br under $2400 near Lake Eola with in-unit laundry',
+    )
+    expect(r.listings[0]!.score.textRelevance).toBeGreaterThan(0)
+  })
+})

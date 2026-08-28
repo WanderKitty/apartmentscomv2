@@ -10,6 +10,7 @@ const LLM_OUT = {
   furnished: null,
   short_term: null,
   amenities: ["pet friendly", "in-unit laundry"],
+  sort: "relevance" as const,
   residual_text: "",
 };
 
@@ -59,5 +60,12 @@ describe("parseQueryWith", () => {
   it("falls open when no client can be constructed (no API key)", async () => {
     const p = await parseQueryWith("1br mills 50", null, {});
     expect(p.parseSource).toBe("fallback");
+  });
+
+  it("maps sort ordering intent from the LLM output", async () => {
+    const out = { ...LLM_OUT, price_max_dollars: null, sort: "price_asc" as const, residual_text: "" };
+    const p = await parseQueryWith("cheapest near lake eola", fakeClient(out) as never);
+    expect(p.sort).toBe("price_asc");
+    expect(p.priceMax).toBeNull(); // "cheapest" is an ordering, never a price cap
   });
 });

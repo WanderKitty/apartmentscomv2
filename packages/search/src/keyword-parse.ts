@@ -67,6 +67,22 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
     .filter(([, keywords]) => keywords.some((k) => wordRegex(k).test(q)))
     .map(([name]) => name);
 
+  // Ordering intent, not a constraint: "cheapest" ranks matches by price —
+  // it is not priceMax and must not fall through to the residual FTS gate.
+  // "smallest"/"biggest" order by square footage (apartment-speak for size).
+  let sort: ParsedQuery["sort"] = "relevance";
+  if (/\b(cheapest|cheap(er)?|lowest (price|rent)|most affordable)\b/.test(q)) {
+    sort = "price_asc";
+  } else if (/\b(most expensive|priciest|highest (price|rent))\b/.test(q)) {
+    sort = "price_desc";
+  } else if (/\b(smallest|smaller|least space)\b/.test(q)) {
+    sort = "sqft_asc";
+  } else if (/\b(biggest|bigger|largest|larger|most space)\b/.test(q)) {
+    sort = "sqft_desc";
+  } else if (/\b(newest|just (listed|added)|most recent)\b/.test(q)) {
+    sort = "newest";
+  }
+
   const recognizedAnything =
     neighborhoods.length > 0 ||
     cities.length > 0 ||
@@ -74,7 +90,8 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
     bedsMin !== null ||
     furnished !== null ||
     shortTerm !== null ||
-    amenities.length > 0;
+    amenities.length > 0 ||
+    sort !== "relevance";
 
   return {
     neighborhoods,
@@ -85,6 +102,7 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
     furnished,
     shortTerm,
     amenities,
+    sort,
     // Fail-open ladder (§6.1): nothing recognized → raw text runs as FTS.
     residualText: recognizedAnything ? "" : raw.trim(),
     failedOpen: !recognizedAnything && raw.trim().length > 0,

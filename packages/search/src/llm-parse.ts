@@ -17,10 +17,11 @@ const LlmParseSchema = z.object({
   furnished: z.boolean().nullable(),
   short_term: z.boolean().nullable(),
   amenities: z.array(z.enum(AMENITIES)),
+  sort: z.enum(["relevance", "price_asc", "price_desc", "newest", "sqft_asc", "sqft_desc"]),
   residual_text: z.string(),
 });
 
-const SYSTEM = `You convert one apartment-search query into filters. Extract ONLY constraints the user actually stated; use null for anything not stated. Neighborhoods must come from this exact list (map colloquial names onto them, e.g. "near lake eola" → "Lake Eola Heights"): ${NEIGHBORHOODS.join("; ")}. Cities must come from this exact list: ${CITIES.join("; ")}. A city name is a city filter; neighborhood names take precedence when both could match (e.g. "downtown orlando" is the Downtown Orlando neighborhood, not also the city Orlando). Amenities must come from this exact list: ${AMENITIES.join("; ")}. Bedrooms: a plain count means EXACTLY that many — "2br"/"two bed" → beds_min 2 AND beds_max 2; "studio" → beds_min 0 AND beds_max 0; only an open-ended phrasing ("2+", "at least 2", "2 or more") sets beds_min 2 with beds_max null. Put any leftover free text that expresses a real constraint you could not map into residual_text, else "".`;
+const SYSTEM = `You convert one apartment-search query into filters. Extract ONLY constraints the user actually stated; use null for anything not stated. Neighborhoods must come from this exact list (map colloquial names onto them, e.g. "near lake eola" → "Lake Eola Heights"): ${NEIGHBORHOODS.join("; ")}. Cities must come from this exact list: ${CITIES.join("; ")}. A city name is a city filter; neighborhood names take precedence when both could match (e.g. "downtown orlando" is the Downtown Orlando neighborhood, not also the city Orlando). Amenities must come from this exact list: ${AMENITIES.join("; ")}. Bedrooms: a plain count means EXACTLY that many — "2br"/"two bed" → beds_min 2 AND beds_max 2; "studio" → beds_min 0 AND beds_max 0; only an open-ended phrasing ("2+", "at least 2", "2 or more") sets beds_min 2 with beds_max null. sort expresses ORDERING, never a constraint: "cheapest"/"cheaper"/"lowest rent"/"most affordable" → sort "price_asc" with price_max null; "most expensive"/"priciest" → "price_desc"; "newest"/"just listed" → "newest"; "smallest"/"smaller" (unit size) → "sqft_asc"; "biggest"/"bigger"/"largest" → "sqft_desc"; anything else → "relevance". A sort word is consumed — never repeat it in residual_text. Put any leftover free text that expresses a real constraint you could not map into residual_text, else "".`;
 
 // Spec §6.1 budgets 800ms; the demo uses a looser 2500ms so a cold Haiku
 // round-trip lands as "llm" rather than falling open mid-demo.
@@ -85,6 +86,7 @@ export async function parseQueryWith(
       furnished: out.furnished,
       shortTerm: out.short_term,
       amenities: out.amenities,
+      sort: out.sort,
       residualText: out.residual_text,
       failedOpen: false,
       parseSource: "llm",

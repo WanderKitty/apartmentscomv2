@@ -48,3 +48,31 @@ describe("parseQueryKeywords amenity word-boundary matching", () => {
     expect(p.amenities).toContain("in-unit laundry");
   });
 });
+
+describe("parseQueryKeywords sort intent", () => {
+  it("'cheapest' alone is an ordering — consumed, never residual FTS", () => {
+    const p = parseQueryKeywords("cheapest");
+    expect(p.sort).toBe("price_asc");
+    expect(p.priceMax).toBeNull();
+    expect(p.residualText).toBe("");
+    expect(p.failedOpen).toBe(false);
+  });
+
+  it("combines with filters: 'cheapest 2br in tampa'", () => {
+    const p = parseQueryKeywords("cheapest 2br in tampa");
+    expect(p.sort).toBe("price_asc");
+    expect(p.bedsMin).toBe(2);
+    expect(p.cities).toEqual(["Tampa"]);
+  });
+
+  it("maps expensive/newest/smallest/biggest phrasings", () => {
+    expect(parseQueryKeywords("most expensive").sort).toBe("price_desc");
+    expect(parseQueryKeywords("newest listings").sort).toBe("newest");
+    expect(parseQueryKeywords("smallest 1br").sort).toBe("sqft_asc");
+    expect(parseQueryKeywords("biggest 2 bedroom").sort).toBe("sqft_desc");
+  });
+
+  it("defaults to relevance when no ordering word appears", () => {
+    expect(parseQueryKeywords("2br with pool").sort).toBe("relevance");
+  });
+});
