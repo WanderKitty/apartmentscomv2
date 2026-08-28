@@ -281,6 +281,19 @@ WHERE l.status = 'active'
   AND ($7 = '' OR l.search_tsv @@ plainto_tsquery('english', $7))
 `
 
+// Residual text is a HARD tsquery filter, so phrases the parser leaves
+// behind but no listing text ever contains must not survive into it:
+// bath counts (baths aren't a filter yet) and price-sort words like
+// "cheapest" (a ranking intent, not a keyword) both guaranteed zero
+// results otherwise.
+export function sanitizeResidual(text: string): string {
+  return text
+    .replace(/\b\d+(\.\d+)?\s*(ba|bath|baths|bathroom|bathrooms)\b/gi, ' ')
+    .replace(/\b(cheap|cheapest|affordable|inexpensive|budget)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 const searchParams = (p: ParsedQuery) => [
   p.priceMax === null ? null : p.priceMax * 100,
   p.bedsMin,
@@ -288,7 +301,7 @@ const searchParams = (p: ParsedQuery) => [
   p.shortTerm,
   p.amenities,
   p.neighborhoods,
-  p.residualText,
+  sanitizeResidual(p.residualText),
   p.bedsMax,
 ]
 

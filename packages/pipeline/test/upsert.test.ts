@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Pool } from 'pg'
 import { resetTestDb } from '@aptv2/db/test-helpers'
 import { buildSeedUnits } from '@aptv2/schema'
-import { seedNeighborhoods, upsertProcessedUnits, bumpConfirmed, sweepVanished } from '../src/index'
+import { reassignNeighborhoods, seedNeighborhoods, upsertProcessedUnits, bumpConfirmed, sweepVanished } from '../src/index'
 
 const NOW = new Date('2026-08-27T12:00:00.000Z')
 
@@ -22,13 +22,116 @@ afterAll(async () => {
 })
 
 describe('seedNeighborhoods', () => {
-  it('writes one row per centroid-known neighborhood with aliases', async () => {
+  it('writes one row per boundary-known neighborhood with aliases', async () => {
     const { rows } = await pool.query(
       `SELECT name, aliases FROM neighborhoods WHERE metro = 'orlando' ORDER BY name`,
     )
-    expect(rows.length).toBe(8) // the 8 GEO centroids; Lake Nona has no centroid yet
+    expect(rows.length).toBe(9) // real OSM polygons incl. Lake Nona; Mills 50 is a hand box
     const eola = rows.find((r) => r.name === 'Lake Eola Heights')!
     expect(eola.aliases).toContain('lake eola')
+  })
+
+  it('every seed centroid is inside its own neighborhood polygon', async () => {
+    // Guard for boundary swaps: seed listings sit on these centroids, and
+    // the location filter is spatial — a centroid outside its own polygon
+    // silently zeroes that neighborhood's searches on the demo corpus.
+    const { GEO } = await import('@aptv2/schema')
+    for (const [name, [lat, lng]] of Object.entries(GEO)) {
+      const { rows } = await pool.query(
+        `SELECT 1 FROM neighborhoods
+         WHERE name = $1 AND ST_Covers(boundary, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography)`,
+        [name, lng, lat],
+      )
+      expect(rows.length, `${name} centroid must be inside its polygon`).toBe(1)
+    }
+  })
+
+  // Upserts a one-off fixture listing, runs the assertions, and ALWAYS
+  // removes the fixture's listing + property rows — later tests assert
+  // exact corpus counts, and a failed assertion must not cascade.
+  async function withFixture(
+    slug: string,
+    coords: { latitude: number; longitude: number },
+    fn: (collapseKey: string) => Promise<void>,
+  ): Promise<void> {
+    const collapseKey = `entrata:${slug}`
+    const fixture = {
+      ...units[0]!,
+      source_id: `entrata___${slug}`,
+      collapse_key: collapseKey,
+      liberal_dedup_cluster: `orlando:${slug}`,
+      property_name: `Fixture ${slug}`,
+      address_line1: `1 ${slug} Way`,
+      neighborhood: '',
+      ...coords,
+    }
+    await upsertProcessedUnits(pool, [fixture])
+    try {
+      await fn(collapseKey)
+    } finally {
+      await pool.query(`DELETE FROM listings WHERE collapse_key = $1`, [collapseKey])
+      await pool.query(`DELETE FROM properties WHERE name = $1`, [`Fixture ${slug}`])
+    }
+  }
+
+  it('reassignNeighborhoods backfills rows stranded without an assignment', async () => {
+    // 410 N Orange Ave — Society Orlando's actual location.
+    await withFixture('downtown-backfill-test', { latitude: 28.5484, longitude: -81.3786 }, async (key) => {
+      // Simulate the pre-polygon state: assignment lost.
+      await pool.query(`UPDATE listings SET neighborhood_id = NULL WHERE collapse_key = $1`, [key])
+      await reassignNeighborhoods(pool)
+      const { rows } = await pool.query(
+        `SELECT n.name FROM listings l JOIN neighborhoods n ON n.id = l.neighborhood_id
+         WHERE l.collapse_key = $1`,
+        [key],
+      )
+      expect(rows[0]?.name).toBe('Downtown Orlando')
+    })
+  })
+
+  it('reassignNeighborhoods is deterministic and idempotent inside polygon overlaps', async () => {
+    // The Mills 50 hand box overlaps Lake Eola Heights; assignment must
+    // resolve the same winner every run (smallest covering polygon), and
+    // a second run must change nothing.
+    await withFixture('overlap-test', { latitude: 28.551, longitude: -81.368 }, async (key) => {
+      await reassignNeighborhoods(pool)
+      const { rows: first } = await pool.query(
+        `SELECT neighborhood_id FROM listings WHERE collapse_key = $1`, [key],
+      )
+      const second = await reassignNeighborhoods(pool)
+      const { rows: after } = await pool.query(
+        `SELECT neighborhood_id FROM listings WHERE collapse_key = $1`, [key],
+      )
+      expect(after[0]!.neighborhood_id).toBe(first[0]!.neighborhood_id)
+      expect(second.listings).toBe(0)
+    })
+  })
+
+  it('reassignNeighborhoods un-assigns rows that left every polygon', async () => {
+    await withFixture('outside-test', { latitude: 28.4, longitude: -81.3 }, async (key) => {
+      // Simulate a stale assignment from an old, wrong boundary.
+      await pool.query(
+        `UPDATE listings SET neighborhood_id = (SELECT id FROM neighborhoods LIMIT 1)
+         WHERE collapse_key = $1`,
+        [key],
+      )
+      await reassignNeighborhoods(pool)
+      const { rows } = await pool.query(
+        `SELECT neighborhood_id FROM listings WHERE collapse_key = $1`, [key],
+      )
+      expect(rows[0]!.neighborhood_id).toBeNull()
+    })
+  })
+
+  it('real polygons contain real properties: 410 N Orange Ave resolves to Downtown Orlando', async () => {
+    // Society Orlando's actual location — under the old bbox placeholders
+    // it resolved to NO neighborhood, which zeroed every location search
+    // on the scraped corpus.
+    const { rows } = await pool.query(
+      `SELECT name FROM neighborhoods
+       WHERE ST_Covers(boundary, ST_SetSRID(ST_MakePoint(-81.3786, 28.5484), 4326)::geography)`,
+    )
+    expect(rows.map((r) => r.name)).toContain('Downtown Orlando')
   })
 })
 

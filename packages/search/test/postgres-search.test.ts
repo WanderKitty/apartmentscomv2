@@ -251,6 +251,22 @@ describe('postgres SearchService', () => {
     }
   })
 
+  it('bath counts and price-sort words in residual text never zero the results', async () => {
+    // The LLM rung leaves unmapped phrases ("3 bath", "cheapest") in
+    // residualText, which becomes a HARD tsquery filter — and neither
+    // phrase appears in any listing text, so they zeroed every match.
+    const stub = async (raw: string) => ({
+      ...parseQueryKeywords(raw),
+      bedsMin: 1,
+      bedsMax: 1,
+      residualText: 'cheapest 3 bath',
+      failedOpen: false,
+    })
+    const svc = createSearchService(() => pool, { parse: stub })
+    const r = await svc.search('cheapest 1 bed 3 bath')
+    expect(r.totalCount).toBeGreaterThan(0) // 1-bed seed listings exist
+  })
+
   it('labels a net-effective discount without a structured concession as "Special rate"', async () => {
     const specialRateUnit = ProcessedUnitDataSchema.parse({
       ...minimalUnit(),
