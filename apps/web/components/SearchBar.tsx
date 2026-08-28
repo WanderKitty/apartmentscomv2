@@ -5,8 +5,7 @@ import { buildSuggestions, type Suggestion } from "@/lib/suggest";
 import { SearchButton } from "./SearchButton";
 
 const KIND_LABEL: Record<Suggestion["kind"], string> = {
-  neighborhood: "neighborhood",
-  amenity: "amenity",
+  filter: "filter",
   example: "try it",
 };
 

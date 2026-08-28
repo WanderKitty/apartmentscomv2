@@ -23,19 +23,19 @@ describe("SearchBar autosuggest", () => {
   it("shows completions while typing and applies one on click", () => {
     render(<SearchBar />);
     const input = screen.getByRole("combobox", { name: /search/i });
-    fireEvent.change(input, { target: { value: "2 bed in bald" } });
-    const option = screen.getByRole("option", { name: /Baldwin Park/ });
+    fireEvent.change(input, { target: { value: "furnished 2 b" } });
+    const option = screen.getByRole("option", { name: /2 bed/ });
     fireEvent.mouseDown(option);
-    expect(input).toHaveValue("2 bed in Baldwin Park");
+    expect(input).toHaveValue("furnished 2 bed");
   });
 
   it("supports keyboard selection with arrows and Enter", () => {
     render(<SearchBar />);
     const input = screen.getByRole("combobox", { name: /search/i });
-    fireEvent.change(input, { target: { value: "poo" } });
+    fireEvent.change(input, { target: { value: "fur" } });
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(input).toHaveValue("pool");
+    expect(input).toHaveValue("furnished");
   });
 
   it("submits the COMPLETED query, not the stale fragment (regression)", () => {
@@ -49,15 +49,15 @@ describe("SearchBar autosuggest", () => {
       // whatever is in the DOM at this instant is what gets navigated to.
       submitted = new FormData(form).get("q");
     });
-    fireEvent.change(input, { target: { value: "2 bed in bald" } });
-    fireEvent.mouseDown(screen.getByRole("option", { name: /Baldwin Park/ }));
-    expect(submitted).toBe("2 bed in Baldwin Park");
+    fireEvent.change(input, { target: { value: "furnished 2 b" } });
+    fireEvent.mouseDown(screen.getByRole("option", { name: /2 bed/ }));
+    expect(submitted).toBe("furnished 2 bed");
   });
 
   it("closes the list on Escape", () => {
     render(<SearchBar />);
     const input = screen.getByRole("combobox", { name: /search/i });
-    fireEvent.change(input, { target: { value: "bald" } });
+    fireEvent.change(input, { target: { value: "stu" } });
     expect(screen.getByRole("listbox")).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "Escape" });
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
