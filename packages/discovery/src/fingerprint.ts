@@ -27,6 +27,16 @@ const EMBEDDED_V1_RE = /<script[^>]*id="jd-fp-data-script-app"[^>]*>/
 const EMBEDDED_V2_RE = /:floor_plans='/
 const REST_HINT_RE = /((?:\\\/|\/)wp-json(?:\\\/|\/)entrata(?:\\\/|\/)[a-zA-Z0-9\\/_-]*)/i
 
+// Order note: REST is checked FIRST. On the (so far unobserved, and
+// vanishingly unlikely) page that carries both a REST hint AND an embedded
+// marker, this takes the REST path. That's an acceptable, deliberate choice
+// rather than an accident: a dedicated JSON API route is a strictly cleaner,
+// more reliable signal to probe than scraping an embedded JS blob out of
+// HTML, so when both are present the more trustworthy one should win. No
+// real fixture exercises this dual-marker case; reordering (embedded-first)
+// would be an equally defensible choice if a real site is ever found to
+// need it — this is a documented judgment call, not a load-bearing
+// assumption.
 export function fingerprintEntrata(html: string): FingerprintResult {
   const restMatch = html.match(REST_HINT_RE)
   if (restMatch) {

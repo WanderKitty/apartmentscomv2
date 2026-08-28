@@ -5,8 +5,14 @@ import path from 'node:path'
 import { z } from 'zod'
 import { config } from 'dotenv'
 import type { PoliteFetcher } from '@aptv2/scrapers'
-import { verifyCandidate, type Candidate, type VerifyResult, type VerifyVerdict } from './verify'
+import { verifyCandidate, type Candidate, type VerifyResult, type VerifyVerdict, type RobotsCache } from './verify'
 import type { LlmFactsExtractor, GeocodeFn } from './facts'
+
+// This file's own directory (packages/discovery/src) — used to pin the
+// default report path to the package root regardless of the process's
+// current working directory (review minor: `pnpm --filter` and a bare `tsx`
+// invocation can have different CWDs).
+const PACKAGE_DIR = fileURLToPath(new URL('..', import.meta.url))
 
 // discover-cli (Task 6 runs this, supervised — NOT run in this task). Reads
 // the candidates file, verifies them SEQUENTIALLY (one candidate's ≤4
@@ -41,7 +47,15 @@ export type DiscoverCliResult = {
   reportPath: string
 }
 
-const ALL_VERDICTS: VerifyVerdict[] = ['registered', 'not_entrata', 'not_public', 'no_endpoint', 'no_facts', 'out_of_scope']
+const ALL_VERDICTS: VerifyVerdict[] = [
+  'registered',
+  'not_entrata',
+  'not_public',
+  'unreachable',
+  'no_endpoint',
+  'no_facts',
+  'out_of_scope',
+]
 
 export async function runDiscoverCli(candidatesPath: string, deps: DiscoverCliDeps): Promise<DiscoverCliResult> {
   const log = deps.log ?? ((line: string) => console.log(line))
@@ -54,19 +68,27 @@ export async function runDiscoverCli(candidatesPath: string, deps: DiscoverCliDe
     VerifyVerdict,
     number
   >
+  // Shared across the whole run (review C1): N candidates on the same host
+  // cost exactly ONE robots.txt fetch, not N.
+  const robotsCache: RobotsCache = new Map()
 
   // Sequential by construction: each candidate is fully awaited (robots →
   // ... → up to 4 requests) before the next one starts.
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i]!
-    const r = await verifyCandidate(candidate, deps.fetcher, { pool: deps.pool, llm: deps.llm, geocode: deps.geocode })
+    const r = await verifyCandidate(candidate, deps.fetcher, {
+      pool: deps.pool,
+      llm: deps.llm,
+      geocode: deps.geocode,
+      robotsCache,
+    })
     results.push(r)
     tally[r.verdict]++
     log(`[${i + 1}/${candidates.length}] ${r.url} -> ${r.verdict} (${r.detail})`)
   }
 
   const dateStr = now().toISOString().slice(0, 10)
-  const reportPath = deps.reportPath ?? path.join(process.cwd(), `discovery-report-${dateStr}.json`)
+  const reportPath = deps.reportPath ?? path.join(PACKAGE_DIR, `discovery-report-${dateStr}.json`)
   await writeFile(reportPath, JSON.stringify({ ranAt: now().toISOString(), tally, results }, null, 2))
 
   log(`Tally: ${JSON.stringify(tally)}`)
@@ -98,7 +120,9 @@ if (isMain) {
   const pool = getPool()
   const result = await runDiscoverCli(candidatesArg, {
     pool,
-    fetcher: createPoliteFetcher(),
+    // retry429: false (review I3) — a rate-limited candidate site during a
+    // first-contact verification probe must fail fast, not be hammered.
+    fetcher: createPoliteFetcher({ retry429: false }),
     llm: createHaikuFactsExtractor() ?? undefined,
     geocode: createNominatimGeocoder(pool),
   })

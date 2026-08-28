@@ -100,27 +100,58 @@ function extractFromLdJson(html: string): { core: FactsCore; geo: { latitude: nu
   return null
 }
 
-export async function extractPropertyFacts(html: string, _url: string, deps: FactsDeps): Promise<PropertyFacts | null> {
-  let core: FactsCore | null = null
-  let geo: { latitude: number; longitude: number } | null = null
+const TITLE_RE = /<title[^>]*>([\s\S]*?)<\/title>/i
+const BODY_RE = /<body[^>]*>([\s\S]*)/i
+const SANITY_BODY_WINDOW = 2000
 
+/** Review finding: a real captured fixture (Aperture) carries a stale/wrong
+ * LD+JSON block (a different property's template — "Kinetic" in Atlanta, GA,
+ * with no geo) that would otherwise be trusted verbatim. Before a
+ * deterministic LD+JSON result is trusted, it must pass two cheap sanity
+ * checks against the SAME page: the declared state must be FL (LD+JSON
+ * carrying an out-of-state address is a strong stale/wrong-template signal
+ * for a site this pipeline only ever targets in Florida), and the declared
+ * name must actually appear somewhere a human would see it (the page
+ * <title>, or the first 2KB of the rendered body) — not just inside the
+ * LD+JSON block itself. Failing either sanity check falls through to the
+ * (fail-open) llm path rather than registering untrustworthy data. */
+function passesSanityGate(core: FactsCore, html: string): boolean {
+  if (core.state !== 'FL') return false
+  const title = html.match(TITLE_RE)?.[1] ?? ''
+  const bodyStart = (html.match(BODY_RE)?.[1] ?? '').slice(0, SANITY_BODY_WINDOW)
+  const haystack = `${title} ${bodyStart}`.toLowerCase()
+  return haystack.includes(core.name.toLowerCase())
+}
+
+type CoreResult = { core: FactsCore; geo: { latitude: number; longitude: number } | null }
+
+/** Core (non-geo) facts only: deterministic LD+JSON (sanity-gated), falling
+ * back to the injected `llm` dep (fail-open). Split out from
+ * `extractPropertyFacts` so callers (verifyCandidate) can scope-check the
+ * city BEFORE ever spending a Nominatim request on coordinates. */
+export async function extractCoreFacts(html: string, deps: Pick<FactsDeps, 'llm'>): Promise<CoreResult | null> {
   const deterministic = extractFromLdJson(html)
-  if (deterministic) {
-    core = deterministic.core
-    geo = deterministic.geo
-  } else if (deps.llm) {
+  if (deterministic && passesSanityGate(deterministic.core, html)) return deterministic
+
+  if (deps.llm) {
     try {
-      core = await deps.llm(html)
+      const core = await deps.llm(html)
+      if (core) return { core, geo: null }
     } catch {
-      core = null // fail-open: an llm error degrades to "no facts", never throws
+      // fail-open: an llm error degrades to "no facts", never throws
     }
   }
+  return null
+}
 
-  if (!core) return null
+export async function extractPropertyFacts(html: string, _url: string, deps: FactsDeps): Promise<PropertyFacts | null> {
+  const result = await extractCoreFacts(html, { llm: deps.llm })
+  if (!result) return null
 
+  let geo = result.geo
   if (!geo && deps.geocode) {
     try {
-      geo = await deps.geocode(`${core.address_line1}, ${core.city}, ${core.state} ${core.zip}`)
+      geo = await deps.geocode(`${result.core.address_line1}, ${result.core.city}, ${result.core.state} ${result.core.zip}`)
     } catch {
       geo = null // fail-open: a geocode error just leaves coordinates missing
     }
@@ -128,7 +159,7 @@ export async function extractPropertyFacts(html: string, _url: string, deps: Fac
 
   if (!geo) return null // no facts without coordinates (verifyCandidate's contract requires both)
 
-  return { ...core, ...geo }
+  return { ...result.core, ...geo }
 }
 
 // ---------------------------------------------------------------------

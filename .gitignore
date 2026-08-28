@@ -11,4 +11,4 @@ dist/
 demo-page.png
 .vercel
 .env*
-packages/discovery/discovery-report-*.json
+discovery-report-*.json

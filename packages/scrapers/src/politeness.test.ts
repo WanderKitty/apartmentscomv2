@@ -134,6 +134,19 @@ describe('createPoliteFetcher', () => {
     await expect(g.fetchJson('https://example.com/dead', null)).rejects.toThrow(/503/)
     expect(always503.impl).toHaveBeenCalledTimes(3)
   })
+
+  it('with retry429: false, a 429 is terminal (throws immediately, no retry); 5xx retry is unaffected', async () => {
+    const always429 = fakeFetch([{ status: 429 }])
+    const f = createPoliteFetcher({ fetchImpl: always429.impl, sleep: async () => {}, retry429: false })
+    await expect(f.fetchJson('https://example.com/limited', null)).rejects.toThrow(/429/)
+    expect(always429.impl).toHaveBeenCalledTimes(1) // no retry attempts
+
+    const flaky503 = fakeFetch([{ status: 503 }, { status: 200, body: { ok: 1 } }])
+    const g = createPoliteFetcher({ fetchImpl: flaky503.impl, sleep: async () => {}, retry429: false })
+    const r = await g.fetchJson('https://example.com/flaky', null)
+    expect(r.status).toBe(200) // 5xx still retries even with retry429: false
+    expect(flaky503.impl).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('fetchText', () => {

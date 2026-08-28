@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { Pool } from 'pg'
 import { resetTestDb } from '@aptv2/db/test-helpers'
 import { RobotsDisallowedError, type PoliteFetcher } from '@aptv2/scrapers'
-import { verifyCandidate } from '../src/verify'
+import { verifyCandidate, type RobotsCache } from '../src/verify'
 
 let pool: Pool
 beforeAll(async () => {
@@ -18,7 +18,11 @@ beforeEach(async () => {
 
 // A fake PoliteFetcher keyed by exact URL. 'robots-disallow' simulates the
 // real fetcher's behavior of throwing before any network call happens.
-type Canned = { status: number; body?: unknown; text?: string } | 'robots-disallow'
+// 'network-error' simulates a pure network failure. A canned status of
+// 5xx/429 auto-throws too (review I4/I5) — the real politeness fetcher
+// NEVER returns those statuses to a caller: it retries them internally and
+// eventually throws (or, with retry429:false, throws immediately on 429).
+type Canned = { status: number; body?: unknown; text?: string } | 'robots-disallow' | 'network-error'
 
 function fakeFetcher(responses: Record<string, Canned>): PoliteFetcher {
   const lookup = (url: string): Canned => {
@@ -26,17 +30,40 @@ function fakeFetcher(responses: Record<string, Canned>): PoliteFetcher {
     if (!hit) throw new Error(`unexpected fetch: ${url}`)
     return hit
   }
+  const settle = (r: Canned, url: string): { status: number; body?: unknown; text?: string } => {
+    if (r === 'robots-disallow') throw new RobotsDisallowedError(url)
+    if (r === 'network-error') throw new Error('network error')
+    if (r.status >= 500 || r.status === 429) throw new Error(`fetch failed after 3 attempts (${r.status}): ${url}`)
+    return r
+  }
   return {
     async fetchText(url) {
-      const r = lookup(url)
-      if (r === 'robots-disallow') throw new RobotsDisallowedError(url)
+      const r = settle(lookup(url), url)
       return { status: r.status, body: r.text ?? '' }
     },
     async fetchJson(url) {
-      const r = lookup(url)
-      if (r === 'robots-disallow') throw new RobotsDisallowedError(url)
+      const r = settle(lookup(url), url)
       return { status: r.status, body: r.body }
     },
+  }
+}
+
+/** Wraps a fetcher to count every fetchText/fetchJson call made through it
+ * (review I8: budget verification with a counting fetcher). */
+function countingFetcher(inner: PoliteFetcher): { fetcher: PoliteFetcher; count: () => number } {
+  let n = 0
+  return {
+    fetcher: {
+      fetchText: (...args) => {
+        n++
+        return inner.fetchText(...args)
+      },
+      fetchJson: (...args) => {
+        n++
+        return inner.fetchJson(...args)
+      },
+    },
+    count: () => n,
   }
 }
 
@@ -48,7 +75,12 @@ const PLAIN_HOMEPAGE = { status: 200, text: '<html><body><h1>Not Entrata</h1></b
 
 const ORLANDO_LD_JSON = `<script type="application/ld+json">{"@context":"https://schema.org","@type":"ApartmentComplex","name":"Test Community","address":{"@type":"PostalAddress","streetAddress":"1 Test Blvd","addressLocality":"Orlando","addressRegion":"FL","postalCode":"32801"},"geo":{"@type":"GeoCoordinates","latitude":"28.5","longitude":"-81.4"}}</script>`
 
-const ATLANTA_LD_JSON = `<script type="application/ld+json">{"@context":"https://schema.org","@type":"ApartmentComplex","name":"Out Of Scope Community","address":{"@type":"PostalAddress","streetAddress":"1 Peachtree St","addressLocality":"Atlanta","addressRegion":"GA","postalCode":"30309"},"geo":{"@type":"GeoCoordinates","latitude":"33.8","longitude":"-84.4"}}</script>`
+// A legitimate FL-state entity (passes the I6 sanity gate) whose city
+// (Naples) simply isn't one of the 10 FLORIDA_CITIES — the review's
+// replacement for the old Atlanta/GA example, which now gets rejected
+// earlier (by facts.ts's own sanity gate) rather than reaching the scope
+// check at all.
+const NAPLES_LD_JSON = `<script type="application/ld+json">{"@context":"https://schema.org","@type":"ApartmentComplex","name":"Out Of Scope Community","address":{"@type":"PostalAddress","streetAddress":"1 Bay St","addressLocality":"Naples","addressRegion":"FL","postalCode":"34102"},"geo":{"@type":"GeoCoordinates","latitude":"26.1","longitude":"-81.7"}}</script>`
 
 const REST_HOMEPAGE_HTML = {
   status: 200,
@@ -82,16 +114,57 @@ describe('verifyCandidate', () => {
     expect(result.detail).toBe('not publicly accessible')
   })
 
-  it('homepage 500 → not_entrata', async () => {
+  it('review I4: homepage 5xx (the real fetcher never returns this — it throws) → unreachable, not not_entrata', async () => {
     const fetcher = fakeFetcher({
       'https://example.com/robots.txt': NO_ROBOTS_FILE,
       'https://example.com/': { status: 500, text: '' },
     })
     const result = await verifyCandidate({ url: 'https://example.com/', metro: 'Orlando' }, fetcher, { pool })
-    expect(result.verdict).toBe('not_entrata')
+    expect(result.verdict).toBe('unreachable')
+    expect(result.detail).toBe('unreachable at verification time')
   })
 
-  it('no Entrata fingerprint on homepage or /floor-plans/ → not_entrata', async () => {
+  it('review I4: homepage 429 → unreachable', async () => {
+    const fetcher = fakeFetcher({
+      'https://example.com/robots.txt': NO_ROBOTS_FILE,
+      'https://example.com/': { status: 429, text: '' },
+    })
+    const result = await verifyCandidate({ url: 'https://example.com/', metro: 'Orlando' }, fetcher, { pool })
+    expect(result.verdict).toBe('unreachable')
+  })
+
+  it('review I4: a pure network error fetching the homepage → unreachable', async () => {
+    const fetcher = fakeFetcher({
+      'https://example.com/robots.txt': NO_ROBOTS_FILE,
+      'https://example.com/': 'network-error',
+    })
+    const result = await verifyCandidate({ url: 'https://example.com/', metro: 'Orlando' }, fetcher, { pool })
+    expect(result.verdict).toBe('unreachable')
+  })
+
+  it('review I5: robots.txt 403 → unreachable after exactly 1 request', async () => {
+    const inner = fakeFetcher({ 'https://example.com/robots.txt': { status: 403, text: '' } })
+    const { fetcher, count } = countingFetcher(inner)
+    const result = await verifyCandidate({ url: 'https://example.com/', metro: 'Orlando' }, fetcher, { pool })
+    expect(result.verdict).toBe('unreachable')
+    expect(count()).toBe(1)
+  })
+
+  it('review I5: robots.txt 5xx → unreachable after exactly 1 request', async () => {
+    const inner = fakeFetcher({ 'https://example.com/robots.txt': { status: 503, text: '' } })
+    const { fetcher, count } = countingFetcher(inner)
+    const result = await verifyCandidate({ url: 'https://example.com/', metro: 'Orlando' }, fetcher, { pool })
+    expect(result.verdict).toBe('unreachable')
+    expect(count()).toBe(1)
+  })
+
+  it('review I5: robots.txt throw (network error) → unreachable', async () => {
+    const fetcher = fakeFetcher({ 'https://example.com/robots.txt': 'network-error' })
+    const result = await verifyCandidate({ url: 'https://example.com/', metro: 'Orlando' }, fetcher, { pool })
+    expect(result.verdict).toBe('unreachable')
+  })
+
+  it('no Entrata fingerprint on homepage or /floor-plans/ → not_entrata (also proves robots.txt 404/missing stays permissive: verification reached this far)', async () => {
     const fetcher = fakeFetcher({
       'https://example.com/robots.txt': NO_ROBOTS_FILE,
       'https://example.com/': PLAIN_HOMEPAGE,
@@ -143,13 +216,29 @@ describe('verifyCandidate', () => {
   })
 
   it('facts found but city is not in FLORIDA_CITIES → out_of_scope', async () => {
-    const html = embeddedV1Html(ATLANTA_LD_JSON, '{"units":[{"id_value":1,"bedrooms":"1","bathrooms":"1"}]}')
+    const html = embeddedV1Html(NAPLES_LD_JSON, '{"units":[{"id_value":1,"bedrooms":"1","bathrooms":"1"}]}')
     const fetcher = fakeFetcher({
       'https://example.com/robots.txt': NO_ROBOTS_FILE,
       'https://example.com/': { status: 200, text: html },
     })
     const result = await verifyCandidate({ url: 'https://example.com/', metro: 'Orlando' }, fetcher, { pool })
     expect(result.verdict).toBe('out_of_scope')
+  })
+
+  it('review I7: an out-of-scope candidate burns zero Nominatim (geocode) requests', async () => {
+    const html = embeddedV1Html(NAPLES_LD_JSON, '{"units":[{"id_value":1,"bedrooms":"1","bathrooms":"1"}]}')
+    const fetcher = fakeFetcher({
+      'https://example.com/robots.txt': NO_ROBOTS_FILE,
+      'https://example.com/': { status: 200, text: html },
+    })
+    let geocodeCalls = 0
+    const geocode = async () => {
+      geocodeCalls++
+      return { latitude: 26.1, longitude: -81.7 }
+    }
+    const result = await verifyCandidate({ url: 'https://example.com/', metro: 'Orlando' }, fetcher, { pool, geocode })
+    expect(result.verdict).toBe('out_of_scope')
+    expect(geocodeCalls).toBe(0)
   })
 
   it('full happy path (REST mode) → registered, upserts the sources row with mode + facts', async () => {
@@ -214,5 +303,90 @@ describe('verifyCandidate', () => {
     })
     expect(result.verdict).toBe('registered')
     expect(result.detail).toContain('geocoded=true')
+  })
+
+  describe('review C1: probe URLs resolve RELATIVE TO THE CANDIDATE, not the host origin', () => {
+    it('a root-domain candidate probes "<origin>/floor-plans/" (unchanged behavior)', async () => {
+      const html = embeddedV1Html(ORLANDO_LD_JSON, '{"units":[{"id_value":1,"bedrooms":"1","bathrooms":"1"}]}')
+      const fetcher = fakeFetcher({
+        'https://root-example.com/robots.txt': PERMISSIVE_ROBOTS,
+        'https://root-example.com/': PLAIN_HOMEPAGE, // no fingerprint here — forces the floor-plans probe
+        'https://root-example.com/floor-plans/': { status: 200, text: html },
+      })
+      const result = await verifyCandidate({ url: 'https://root-example.com/', metro: 'Orlando' }, fetcher, { pool })
+      expect(result.verdict).toBe('registered')
+    })
+
+    it('a path-scoped candidate (no trailing slash) probes a SUBDIRECTORY of its own path, not a sibling of the host', async () => {
+      const html = embeddedV1Html(ORLANDO_LD_JSON, '{"units":[{"id_value":1,"bedrooms":"1","bathrooms":"1"}]}')
+      const fetcher = fakeFetcher({
+        'https://mgmt.example.com/robots.txt': PERMISSIVE_ROBOTS,
+        'https://mgmt.example.com/properties/slug': PLAIN_HOMEPAGE, // candidate URL as given, no trailing slash
+        // Correct resolution: a subdirectory of the candidate's OWN page.
+        'https://mgmt.example.com/properties/slug/floor-plans/': { status: 200, text: html },
+        // If verify.ts regressed to origin-based resolution, it would hit
+        // this WRONG sibling URL instead — deliberately NOT registered
+        // here, so that mistake would throw "unexpected fetch" and fail
+        // the test loudly rather than silently passing.
+      })
+      const result = await verifyCandidate(
+        { url: 'https://mgmt.example.com/properties/slug', metro: 'Orlando' },
+        fetcher,
+        { pool },
+      )
+      expect(result.verdict).toBe('registered')
+    })
+  })
+
+  describe('review C1: per-host robots.txt memoization', () => {
+    it('two candidates on the SAME host share one cached robots.txt fetch when a shared RobotsCache is passed', async () => {
+      const robotsCache: RobotsCache = new Map()
+      // Each candidate's own homepage fully resolves (embedded-v1
+      // fingerprint + facts, no separate endpoint request) so the ONLY
+      // variable being measured is the robots.txt saving, not an
+      // incidental floor-plans probe.
+      const html = embeddedV1Html(ORLANDO_LD_JSON, '{"units":[{"id_value":1,"bedrooms":"1","bathrooms":"1"}]}')
+      const inner = fakeFetcher({
+        'https://shared-host.example.com/robots.txt': PERMISSIVE_ROBOTS,
+        'https://shared-host.example.com/a': { status: 200, text: html },
+        'https://shared-host.example.com/b': { status: 200, text: html },
+      })
+      const { fetcher, count } = countingFetcher(inner)
+      await verifyCandidate({ url: 'https://shared-host.example.com/a', metro: 'Orlando' }, fetcher, { pool, robotsCache })
+      const afterFirst = count()
+      await verifyCandidate({ url: 'https://shared-host.example.com/b', metro: 'Orlando' }, fetcher, { pool, robotsCache })
+      const afterSecond = count()
+      // Second candidate costs exactly one more request (its own homepage) —
+      // no second robots.txt fetch.
+      expect(afterSecond - afterFirst).toBe(1)
+    })
+  })
+
+  describe('review I8: request budget, verified with a counting fetcher', () => {
+    it('robots-disallow costs exactly 1 request', async () => {
+      const inner = fakeFetcher({ 'https://budget-a.example.com/robots.txt': DISALLOW_ALL_ROBOTS })
+      const { fetcher, count } = countingFetcher(inner)
+      const result = await verifyCandidate({ url: 'https://budget-a.example.com/', metro: 'Orlando' }, fetcher, { pool })
+      expect(result.verdict).toBe('not_public')
+      expect(count()).toBe(1)
+    })
+
+    it('the worst full path (no fingerprint on homepage, found via the floor-plans probe, REST mode) costs at most 4 requests', async () => {
+      const restFloorplansHtml = {
+        status: 200,
+        text: `<html><head><script id="x-js-extra">var s={"endpoint":"\\/wp-json\\/entrata\\/v3\\/termrent-floor-plans"};</script></head><body>${ORLANDO_LD_JSON}</body></html>`,
+      }
+      const inner = fakeFetcher({
+        'https://budget-b.example.com/robots.txt': PERMISSIVE_ROBOTS, // 1
+        'https://budget-b.example.com/': PLAIN_HOMEPAGE, // 2 — no fingerprint here
+        'https://budget-b.example.com/floor-plans/': restFloorplansHtml, // 3 — fingerprint + facts found here
+        'https://budget-b.example.com/wp-json/entrata/v3/termrent-floor-plans': { status: 200, body: VALID_REST_PAYLOAD }, // 4
+      })
+      const { fetcher, count } = countingFetcher(inner)
+      const result = await verifyCandidate({ url: 'https://budget-b.example.com/', metro: 'Orlando' }, fetcher, { pool })
+      expect(result.verdict).toBe('registered')
+      expect(count()).toBeLessThanOrEqual(4)
+      expect(count()).toBe(4)
+    })
   })
 })
