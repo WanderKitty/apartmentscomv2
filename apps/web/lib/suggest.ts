@@ -9,7 +9,7 @@
 
 export type Suggestion = {
   label: string;
-  kind: "filter" | "example";
+  kind: "filter" | "neighborhood" | "example";
   /** The full query after accepting this suggestion. */
   apply: string;
 };
@@ -20,10 +20,10 @@ export type Suggestion = {
 // examples stick to beds/price/furnished until those land (verified against
 // prod 2026-08-28: 20 / 21 / 8 / 8 results).
 export const EXAMPLE_QUERIES = [
+  "2 bed downtown",
   "furnished 1 bed under $2,500",
   "2 bed under $2,200",
   "studio under $2,000",
-  "furnished studio",
 ];
 
 // Filters the parser maps to hard SQL predicates that the scraped corpus
@@ -36,6 +36,10 @@ const CANDIDATES: Array<{ label: string; kind: Suggestion["kind"]; terms: string
   { label: "furnished", kind: "filter", terms: ["furnished"] },
   { label: "under $2,000", kind: "filter", terms: ["under $2,000"] },
   { label: "under $2,500", kind: "filter", terms: ["under $2,500"] },
+  // The one neighborhood with live inventory (138 downtown listings after
+  // the real-polygon backfill, verified 2026-08-28). Others rejoin as the
+  // corpus grows into them.
+  { label: "downtown", kind: "neighborhood", terms: ["downtown", "downtown orlando", "cbd"] },
 ];
 
 /**
