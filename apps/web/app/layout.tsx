@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import Link from "next/link";
-import { NavLinks } from "@/components/NavLinks";
 import "./globals.css";
 
 // The reference design system runs Airbnb Cereal VF (proprietary — we can't
@@ -41,7 +40,6 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                 Orlando apartment search
               </span>
             </Link>
-            <NavLinks />
           </div>
         </header>
 
