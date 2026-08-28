@@ -53,6 +53,25 @@ describe('extractSpherexxCards (golden, from the captured fixture)', () => {
   it('throws the shared shape error on a wrong-shaped page', () => {
     expect(() => extractSpherexxCards('<html><body>nothing here</body></html>')).toThrow(EntrataPayloadError)
   })
+
+  it('unwraps the noscript resize-proxy thumbnail to the direct CDN image', () => {
+    expect(cards[0]!.imageUrl).toBe(
+      'https://sxxweb8cdn.cachefly.net/common/uploads/zrs2019/1074/media/b432fb2b-099c-47c1-bf44-7abaac8249da.jpg',
+    )
+    for (const c of cards) expect(c.imageUrl).toMatch(/^https:\/\/.*\.jpg$/)
+  })
+
+  it('yields no image for silhouette placeholders and relative srcs', () => {
+    const card = (img: string) =>
+      `<article class="floorplans__floorplan" data-fp="1" data-name="X">` +
+      `2 BED • 2 Bath<noscript><img src="${img}" /></noscript></article>`
+    const silhouette = extractSpherexxCards(card('/common/uploads/resources/img/default-silhouette.png'))
+    expect(silhouette[0]!.imageUrl).toBeNull()
+    const proxied = extractSpherexxCards(
+      card('https://cdn.example.net/img/thumbnail.aspx?p=/media/a.jpg&amp;x=50&amp;y=50'),
+    )
+    expect(proxied[0]!.imageUrl).toBe('https://cdn.example.net/media/a.jpg')
+  })
 })
 
 describe('parseSpherexxPayload', () => {
@@ -65,6 +84,9 @@ describe('parseSpherexxPayload', () => {
     expect(u.unitNumber).toBeNull() // floorplan granularity → "starting at"
     expect(u.detailUrl).toBe('https://www.live55westorlando.com/floorplans/2bedroom/the-flagler-north/')
     expect(u.marketingTexts.some((t) => t.includes('mandatory fees'))).toBe(true)
+    expect(u.imageUrl).toBe(
+      'https://sxxweb8cdn.cachefly.net/common/uploads/zrs2019/1074/media/b432fb2b-099c-47c1-bf44-7abaac8249da.jpg',
+    )
     expect(() => parseSpherexxPayload('nonsense')).toThrow(/spherexx/)
   })
 
