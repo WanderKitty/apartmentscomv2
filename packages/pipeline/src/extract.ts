@@ -48,20 +48,31 @@ export async function extractSnapshot(
   const units: ProcessedUnitData[] = []
   const failures: Array<{ externalId: string; error: string }> = []
 
-  // Keyed on the enrichment INPUTS only (not the whole raw unit) so a
-  // rent/availability change doesn't bust an LLM result that's still valid.
-  const unitHashes = parsed.map((ru) => sha256Json({ texts: [...ru.amenityTexts, ...ru.marketingTexts], v: 2 }))
+  // Best-effort hash list for the batch prefetch ONLY — keyed on the
+  // enrichment INPUTS only (not the whole raw unit) so a rent/availability
+  // change doesn't bust an LLM result that's still valid. A unit whose hash
+  // can't be computed here is simply left out of the prefetch: the per-unit
+  // try below recomputes it and is where such a failure is actually caught
+  // and counted, so a single malformed unit can never crash the whole
+  // snapshot (review Important 5).
+  const prefetchHashes: string[] = []
+  for (const ru of parsed) {
+    try {
+      prefetchHashes.push(sha256Json({ texts: [...ru.amenityTexts, ...ru.marketingTexts], v: 2 }))
+    } catch {
+      // swallowed here — the per-unit try below will hit (and count) this same failure
+    }
+  }
   // Scale fix: one batched lookup for the whole snapshot instead of a
   // per-unit round trip — a large snapshot could otherwise issue hundreds
   // of individual cache SELECTs.
-  const cached = await fetchCachedEnrichments(pool, unitHashes)
+  const cached = await fetchCachedEnrichments(pool, prefetchHashes)
 
-  for (let i = 0; i < parsed.length; i++) {
-    const ru = parsed[i]!
+  for (const ru of parsed) {
     try {
       const externalId = `${slug(prop.name)}-${slug(ru.externalId)}`
       const texts = [...ru.amenityTexts, ...ru.marketingTexts]
-      const unitHash = unitHashes[i]!
+      const unitHash = sha256Json({ texts, v: 2 })
       const enrichment = await cachedEnrichment(pool, unitHash, args.llm ?? null, texts, cached)
       // Guard (prod incident 2026-08-28): a concession without a positive
       // lease term cannot be amortized — netEffectiveMonthlyCents divides by

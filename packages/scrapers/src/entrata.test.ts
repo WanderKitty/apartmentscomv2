@@ -178,4 +178,19 @@ describe('entrataAdapter', () => {
     await entrataAdapter.fetch({ ...SOURCE, rate_limit_rps: '0.5' as unknown as number }, fetcher)
     expect(seenMaxRps).toBe(0.5)
   })
+
+  it('a non-positive rate_limit_rps (0, negative, or garbage) falls back to the fetcher default spacing (M8a)', async () => {
+    let seenMaxRps: number | undefined = -999
+    const fetcher: PoliteFetcher = {
+      fetchJson: async () => {
+        throw new Error('unused')
+      },
+      fetchText: async (url, policy, opts) => {
+        seenMaxRps = opts?.maxRps
+        return { status: 200, body: JSON.stringify(restPayload) }
+      },
+    }
+    await entrataAdapter.fetch({ ...SOURCE, rate_limit_rps: '-1' as unknown as number }, fetcher)
+    expect(seenMaxRps).toBeUndefined()
+  })
 })

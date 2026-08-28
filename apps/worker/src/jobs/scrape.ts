@@ -1,7 +1,7 @@
 import type pg from 'pg'
 import type PgBoss from 'pg-boss'
 import {
-  createPoliteFetcher, parseRobots, entrataAdapter,
+  coerceMaxRps, createPoliteFetcher, parseRobots, entrataAdapter,
   type PoliteFetcher, type SourceRow,
 } from '@aptv2/scrapers'
 import {
@@ -34,8 +34,7 @@ export async function runScrape(
   const runId = run[0]!.id
   try {
     // Refresh robots policy once per run (cheap; cached in the sources row).
-    // rate_limit_rps is a `numeric` column — pg returns it as a string.
-    const maxRps = Number(source.rate_limit_rps)
+    const maxRps = coerceMaxRps(source.rate_limit_rps)
     let policy = source.robots_policy
     try {
       const origin = new URL(source.website_url).origin

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPathAllowed, parseRobots } from './robots'
+import { isPathAllowed, parseRobots, type RobotsPolicy } from './robots'
 
 const TXT = `
 User-agent: *
@@ -81,5 +81,15 @@ describe('parseRobots + isPathAllowed: Allow, wildcards, $ anchor (Google REP se
     const p = parseRobots('User-agent: *\nAllow: /$\nDisallow: /\n', '*')
     expect(isPathAllowed(p, '/')).toBe(true)
     expect(isPathAllowed(p, '/page.htm')).toBe(false)
+  })
+
+  // Pinning test (review CRITICAL 1): every sources.robots_policy row
+  // written before this task is JSONB with only {disallow,
+  // crawlDelaySeconds} — no `allow` key at all. No data backfill is
+  // planned, so isPathAllowed must not crash on that legacy shape.
+  it('does not throw on a legacy stored policy with no `allow` key', () => {
+    const legacyPolicy = { disallow: ['/admin'], crawlDelaySeconds: null } as RobotsPolicy
+    expect(() => isPathAllowed(legacyPolicy, '/x')).not.toThrow()
+    expect(isPathAllowed(legacyPolicy, '/x')).toBe(true)
   })
 })

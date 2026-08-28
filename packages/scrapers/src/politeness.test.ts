@@ -90,6 +90,18 @@ describe('createPoliteFetcher', () => {
     expect(sleeps.some((ms) => ms >= 1999)).toBe(true)
   })
 
+  it('refuses a query-string-disallowed URL before sending (review IMPORTANT 3: path+query, not path alone)', async () => {
+    const { impl } = fakeFetch([{ status: 200 }])
+    const f = createPoliteFetcher({ fetchImpl: impl, sleep: async () => {} })
+    // Google REP wildcard rule from robots.ts's own tests — only reachable
+    // live if the gate checks pathname+search, not pathname alone.
+    const policy = parseRobots('User-agent: *\nDisallow: /*?s=\n', USER_AGENT)
+    await expect(f.fetchJson('https://example.com/search?s=test', policy)).rejects.toBeInstanceOf(
+      RobotsDisallowedError,
+    )
+    expect(impl).not.toHaveBeenCalled()
+  })
+
   it('a retry never sleeps shorter than the crawl-delay (review IMPORTANT 3)', async () => {
     const sleeps: number[] = []
     let clock = 0

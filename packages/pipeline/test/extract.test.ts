@@ -5,6 +5,7 @@ import { Pool } from 'pg'
 import { resetTestDb } from '@aptv2/db/test-helpers'
 import { ProcessedUnitDataSchema } from '@aptv2/schema'
 import { parseEntrataPayload, sha256Json, type SourceRow } from '@aptv2/scrapers'
+import * as scrapersModule from '@aptv2/scrapers'
 import { createHaikuEnricher, extractSnapshot } from '../src/extract'
 
 const payload = JSON.parse(
@@ -231,6 +232,35 @@ describe('extractSnapshot: cache batch-fetch path', () => {
     const preCachedUnit = units[withTextIndex]!
     expect(preCachedUnit.pets_allowed).toBe('allowed') // served from the pre-seeded cache row, not the enricher
     expect(enricherCalls.some((t) => sha256Json({ texts: t, v: 2 }) === preCachedHash)).toBe(false)
+  })
+
+  it('a malformed unit (its hash computation throws) is a counted failure, not a whole-snapshot crash (review Important 5)', async () => {
+    const rawUnits = parseEntrataPayload(payload, SOURCE.endpoint_config.endpoint_url)
+    const targetIndex = rawUnits.findIndex((u) => u.amenityTexts.length + u.marketingTexts.length > 0)
+    expect(targetIndex).toBeGreaterThanOrEqual(0)
+    const targetTexts = [...rawUnits[targetIndex]!.amenityTexts, ...rawUnits[targetIndex]!.marketingTexts]
+    const realSha256Json = scrapersModule.sha256Json
+    const spy = vi.spyOn(scrapersModule, 'sha256Json').mockImplementation((value: unknown) => {
+      const v = value as { texts?: unknown[] }
+      const isTarget =
+        Array.isArray(v?.texts) && v.texts.length === targetTexts.length && v.texts.every((t, i) => t === targetTexts[i])
+      if (isTarget) throw new Error('boom: malformed unit')
+      return realSha256Json(value)
+    })
+    try {
+      const { units, failures } = await extractSnapshot(pool, {
+        snapshot: { id: 100, source_id: SOURCE.id, payload }, source: SOURCE, now: NOW, llm: null,
+      })
+      // The ONE unit whose hash computation throws is counted as a failure
+      // (like any other per-unit extraction error) — every OTHER unit in
+      // the same snapshot still extracts, proving the failure didn't take
+      // down the whole snapshot.
+      expect(failures.length).toBe(1)
+      expect(failures[0]!.error).toMatch(/boom: malformed unit/)
+      expect(units.length).toBe(rawUnits.length - 1)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

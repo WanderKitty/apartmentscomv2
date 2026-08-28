@@ -4,6 +4,7 @@ export {
   RobotsDisallowedError,
   createPoliteFetcher,
   sha256Json,
+  coerceMaxRps,
   type PoliteFetcher,
   type FetchOpts,
 } from './politeness'

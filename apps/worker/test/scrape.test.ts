@@ -182,7 +182,7 @@ describe('runScrape → runProcess', () => {
         // Mirrors createPoliteFetcher's own gate (politeness.ts's politeRequest):
         // if the policy passed in disallows this path, the real fetcher
         // would throw before ever reaching the network.
-        if (policy && !isPathAllowed(policy, new URL(url).pathname)) throw new RobotsDisallowedError(url)
+        if (policy && !isPathAllowed(policy, new URL(url).pathname + new URL(url).search)) throw new RobotsDisallowedError(url)
         endpointFetched = true
         return { status: 200, body: payloadText }
       },
@@ -293,20 +293,82 @@ describe('runScrape → runProcess', () => {
     )
     expect(cycle2SnapBeforeProcess.rows[0].processing_status).toBe('pending')
 
+    // "Processing rerun" (brief's own phrase): actually reprocess cycle 2's
+    // snapshot rather than leaving it forever 'pending'. Content is still
+    // byte-identical to cycle 1's corrupted payload, so this reprocessing
+    // deterministically fails the same unit again — a genuinely CLEAN
+    // extraction only becomes possible once the payload itself is fixed,
+    // which is what the next (clean) round below does. The point proven
+    // here is narrower but real: reprocessing runs to completion (no crash)
+    // and correctly re-marks the snapshot 'partial', instead of silently
+    // leaving a permanently-'pending', never-retried row.
+    const cycle2Processed = await runProcess(
+      pool, { llm: null }, { snapshotId: cycle2.snapshotId!, sourceId: partialDupSourceId, runId: cycle2.runId },
+    )
+    expect(cycle2Processed.failures).toBeGreaterThanOrEqual(1)
+    const cycle2SnapAfterProcess = await pool.query(
+      `SELECT processing_status FROM raw_snapshots WHERE id = $1`, [cycle2.snapshotId],
+    )
+    expect(cycle2SnapAfterProcess.rows[0].processing_status).toBe('partial')
+
     // Fully-clean process: fix the payload and reprocess cleanly.
     const clean = await runScrape(pool, { fetcher: fetcherFor(payloadText) }, partialDupSourceId)
     expect(clean.unchanged).toBe(false)
     const cleanProcessed = await runProcess(
       pool, { llm: null }, { snapshotId: clean.snapshotId!, sourceId: partialDupSourceId, runId: clean.runId },
     )
-    expect(cleanProcessed.failures).toBe(0)
+    expect(cleanProcessed.failures).toBe(0) // genuinely clean extraction, now that the content itself is fixed
     const cleanSnap = await pool.query(`SELECT processing_status FROM raw_snapshots WHERE id = $1`, [clean.snapshotId])
     expect(cleanSnap.rows[0].processing_status).toBe('processed')
 
     // Cycle 3: same clean payload — the matched prior snapshot IS
     // 'processed', so this one short-circuits as usual.
+    const beforeCycle3 = await pool.query(
+      `SELECT max(last_confirmed_at) AS t FROM listings WHERE source_ref = $1`, [partialDupSourceId],
+    )
     const cycle3 = await runScrape(pool, { fetcher: fetcherFor(payloadText) }, partialDupSourceId)
     expect(cycle3.unchanged).toBe(true)
     expect(cycle3.snapshotId).toBeNull()
+    // Confirmations bumped for THIS source (the unchanged path still
+    // confirms every active listing is live) and the stub payload written
+    // for THIS source's cycle-3 row points at the matched 'processed' snapshot.
+    const afterCycle3 = await pool.query(
+      `SELECT max(last_confirmed_at) AS t FROM listings WHERE source_ref = $1`, [partialDupSourceId],
+    )
+    expect(new Date(afterCycle3.rows[0].t).getTime()).toBeGreaterThan(new Date(beforeCycle3.rows[0].t).getTime())
+    const cycle3Snap = await pool.query(
+      `SELECT payload FROM raw_snapshots WHERE source_id = $1 ORDER BY id DESC LIMIT 1`, [partialDupSourceId],
+    )
+    expect(cycle3Snap.rows[0].payload).toEqual({ unchanged_ref: clean.snapshotId })
+  })
+
+  it('a legacy robots_policy row (no `allow` key) does not crash the scrape (review CRITICAL 1)', async () => {
+    const { rows: legacy } = await pool.query(
+      `INSERT INTO sources (platform, name, website_url, endpoint_config, robots_policy)
+       VALUES ('entrata', 'Legacy Policy Community', 'https://example.com/legacy-policy',
+               '{"endpoint_url":"https://example.com/legacy-policy/feed.json","property":{"name":"Legacy Policy Community","address_line1":"7 Fixture St","city":"Orlando","state":"FL","zip":"32801","latitude":28.54,"longitude":-81.38}}',
+               '{"disallow": ["/admin"], "crawlDelaySeconds": null}')
+       RETURNING id`,
+    )
+    const legacySourceId = legacy[0].id
+    // The robots.txt refresh 404s, so runScrape keeps the STORED legacy
+    // policy (no `allow` key) and gates the endpoint fetch with it. This
+    // stub mirrors the REAL politeness fetcher's own gate (politeness.ts's
+    // politeRequest calls isPathAllowed with exactly this policy) — a fake
+    // that ignored the policy entirely wouldn't exercise the crash at all.
+    const fetcher: PoliteFetcher = {
+      fetchJson: async () => {
+        throw new Error('fetchJson should never be called by the entrata adapter')
+      },
+      fetchText: async (url, policy) => {
+        if (url.endsWith('/robots.txt')) return { status: 404, body: '' }
+        if (policy && !isPathAllowed(policy, new URL(url).pathname + new URL(url).search)) throw new RobotsDisallowedError(url)
+        return { status: 200, body: payloadText }
+      },
+    }
+    const result = await runScrape(pool, { fetcher }, legacySourceId)
+    expect(result.unchanged).toBe(false)
+    const run = await pool.query(`SELECT status FROM scrape_runs WHERE id = $1`, [result.runId])
+    expect(run.rows[0].status).toBe('ok')
   })
 })
