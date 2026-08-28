@@ -13,6 +13,14 @@ export const NEIGHBORHOOD_ALIASES: Record<string, string[]> = {
   "Lake Nona": ["lake nona"],
 };
 
+/** Closed enum of Florida cities the city filter can match (spec-adjacent
+ * discovery constraint: new sources may only register in these cities, or
+ * add to this list in the same commit). */
+export const FLORIDA_CITIES = [
+  "Orlando", "Tampa", "Miami", "Jacksonville", "St. Petersburg",
+  "Fort Lauderdale", "Kissimmee", "Winter Park", "Gainesville", "Tallahassee",
+] as const;
+
 export const AMENITY_KEYWORDS: Record<string, string[]> = {
   pool: ["pool"],
   gym: ["gym", "fitness"],

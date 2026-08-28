@@ -77,6 +77,9 @@ export interface Listing {
 /** Output of the query-parse step (§6.1). */
 export interface ParsedQuery {
   neighborhoods: string[];
+  /** Closed enum (FLORIDA_CITIES). Neighborhood aliases take precedence
+   * when both could match the same text. */
+  cities: string[];
   priceMax: number | null;
   bedsMin: number | null;
   /**

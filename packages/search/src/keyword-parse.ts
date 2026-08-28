@@ -1,12 +1,28 @@
-import { AMENITY_KEYWORDS, NEIGHBORHOOD_ALIASES, type ParsedQuery } from "@aptv2/schema";
+import { AMENITY_KEYWORDS, FLORIDA_CITIES, NEIGHBORHOOD_ALIASES, type ParsedQuery } from "@aptv2/schema";
+
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const cityWordRegex = (city: string) => new RegExp(`\\b${escapeRegex(city.toLowerCase())}\\b`);
 
 /** Deterministic keyword rung of the fail-open ladder (spec §6.1). */
 export function parseQueryKeywords(raw: string): ParsedQuery {
   const q = raw.toLowerCase();
 
-  const neighborhoods = Object.entries(NEIGHBORHOOD_ALIASES)
-    .filter(([, aliases]) => aliases.some((a) => q.includes(a)))
-    .map(([name]) => name);
+  const matchedNeighborhoods = Object.entries(NEIGHBORHOOD_ALIASES).filter(([, aliases]) =>
+    aliases.some((a) => q.includes(a)),
+  );
+  const neighborhoods = matchedNeighborhoods.map(([name]) => name);
+
+  // Neighborhood aliases take precedence over city names: mask out matched
+  // alias text before scanning for cities so a city name that only occurs
+  // inside an already-matched alias (e.g. "orlando" in "downtown orlando")
+  // is not also emitted as a separate city filter.
+  let cityScanText = q;
+  for (const [, aliases] of matchedNeighborhoods) {
+    for (const a of aliases) {
+      if (cityScanText.includes(a)) cityScanText = cityScanText.split(a).join(" ".repeat(a.length));
+    }
+  }
+  const cities = FLORIDA_CITIES.filter((c) => cityWordRegex(c).test(cityScanText));
 
   const priceMatch = q.match(
     /(?:under|below|less than|<=?|max)\s*\$?\s*([\d,]+)\s*(k?)/,
@@ -18,7 +34,7 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
   }
 
   // Plain "1 bedroom" means EXACTLY one; only an explicit "1+", "at least",
-  // or "or more" phrasing leaves the upper bound open (user ruling).
+  // or "or more" phrasing leaves the upper bound open.
   let bedsMin: number | null = null;
   let bedsMax: number | null = null;
   if (/\bstudio\b/.test(q)) {
@@ -50,6 +66,7 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
 
   const recognizedAnything =
     neighborhoods.length > 0 ||
+    cities.length > 0 ||
     priceMax !== null ||
     bedsMin !== null ||
     furnished !== null ||
@@ -58,6 +75,7 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
 
   return {
     neighborhoods,
+    cities,
     priceMax,
     bedsMin,
     bedsMax,

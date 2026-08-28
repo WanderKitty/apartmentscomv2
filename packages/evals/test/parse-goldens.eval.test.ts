@@ -5,9 +5,9 @@ import { GOLDENS } from '../src/goldens'
 const KEY = process.env.ANTHROPIC_API_KEY
 
 describe.skipIf(!KEY)('golden parse regression (live claude-haiku-4-5)', () => {
-  it('meets per-field accuracy thresholds over the 50-query golden set', async () => {
+  it(`meets per-field accuracy thresholds over the ${GOLDENS.length}-query golden set`, async () => {
     __resetParseCacheForTests()
-    const fields = ['neighborhoods', 'priceMax', 'bedsMin', 'bedsMax', 'furnished', 'shortTerm', 'amenities'] as const
+    const fields = ['neighborhoods', 'cities', 'priceMax', 'bedsMin', 'bedsMax', 'furnished', 'shortTerm', 'amenities'] as const
     const hits: Record<string, number> = Object.fromEntries(fields.map((f) => [f, 0]))
     const misses: string[] = []
     let llmCount = 0
@@ -16,6 +16,7 @@ describe.skipIf(!KEY)('golden parse regression (live claude-haiku-4-5)', () => {
       if (p.parseSource === 'llm') llmCount++
       const exp: Record<string, unknown> = {
         neighborhoods: [...(g.expect.neighborhoods ?? [])].sort(),
+        cities: [...(g.expect.cities ?? [])].sort(),
         priceMax: g.expect.priceMax ?? null,
         bedsMin: g.expect.bedsMin ?? null,
         bedsMax: g.expect.bedsMax ?? null,
@@ -25,6 +26,7 @@ describe.skipIf(!KEY)('golden parse regression (live claude-haiku-4-5)', () => {
       }
       const got: Record<string, unknown> = {
         neighborhoods: [...p.neighborhoods].sort(),
+        cities: [...p.cities].sort(),
         priceMax: p.priceMax,
         bedsMin: p.bedsMin,
         bedsMax: p.bedsMax,
@@ -45,6 +47,7 @@ describe.skipIf(!KEY)('golden parse regression (live claude-haiku-4-5)', () => {
     expect(hits.bedsMin! / n).toBeGreaterThanOrEqual(0.95)
     expect(hits.bedsMax! / n).toBeGreaterThanOrEqual(0.9)
     expect(hits.neighborhoods! / n).toBeGreaterThanOrEqual(0.9)
+    expect(hits.cities! / n).toBeGreaterThanOrEqual(0.9)
     expect(hits.furnished! / n).toBeGreaterThanOrEqual(0.9)
     expect(hits.shortTerm! / n).toBeGreaterThanOrEqual(0.9)
     expect(hits.amenities! / n).toBeGreaterThanOrEqual(0.85)

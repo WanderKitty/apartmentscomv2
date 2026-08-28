@@ -65,6 +65,7 @@ FROM (
           SELECT 1 FROM neighborhoods nh2
           WHERE nh2.name = ANY($6::text[]) AND ST_Covers(nh2.boundary, l.location)))
     AND ($7 = '' OR l.search_tsv @@ plainto_tsquery('english', $7))
+    AND (cardinality($9::text[]) = 0 OR lower(p.city) = ANY($9::text[]))
 ) q
 ORDER BY (q.price_cents IS NULL) ASC, score_total DESC, q.source_platform, q.source_external_id
 -- Safety valve: pagination is future work; the returned page is what
@@ -272,6 +273,7 @@ WHERE l.status = 'active'
         SELECT 1 FROM neighborhoods nh2
         WHERE nh2.name = ANY($6::text[]) AND ST_Covers(nh2.boundary, l.location)))
   AND ($7 = '' OR l.search_tsv @@ plainto_tsquery('english', $7))
+  AND (cardinality($9::text[]) = 0 OR lower(p.city) = ANY($9::text[]))
 `
 
 const searchParams = (p: ParsedQuery) => [
@@ -283,6 +285,7 @@ const searchParams = (p: ParsedQuery) => [
   p.neighborhoods,
   p.residualText,
   p.bedsMax,
+  p.cities.map((c) => c.toLowerCase()),
 ]
 
 type DropCandidate = { drop: string; label: string; strip: (p: ParsedQuery) => ParsedQuery }
@@ -291,6 +294,8 @@ function activeDrops(p: ParsedQuery): DropCandidate[] {
   const out: DropCandidate[] = []
   if (p.neighborhoods.length > 0)
     out.push({ drop: 'neighborhoods', label: p.neighborhoods.join(', '), strip: (q) => ({ ...q, neighborhoods: [] }) })
+  if (p.cities.length > 0)
+    out.push({ drop: 'city', label: p.cities.join(', '), strip: (q) => ({ ...q, cities: [] }) })
   if (p.priceMax !== null)
     out.push({ drop: 'priceMax', label: `Under $${p.priceMax.toLocaleString('en-US')}`, strip: (q) => ({ ...q, priceMax: null }) })
   if (p.bedsMin !== null)
@@ -320,6 +325,7 @@ function rebuildQuery(p: ParsedQuery): string {
   if (p.bedsMin !== null)
     parts.push(p.bedsMin === 0 ? 'studio' : `${p.bedsMin}${p.bedsMax === null ? '+' : ''}br`)
   if (p.neighborhoods.length > 0) parts.push(`in ${p.neighborhoods[0]}`)
+  else if (p.cities.length > 0) parts.push(`in ${p.cities[0]}`)
   if (p.priceMax !== null) parts.push(`under $${p.priceMax}`)
   parts.push(...p.amenities)
   if (p.furnished === true) parts.push('furnished')

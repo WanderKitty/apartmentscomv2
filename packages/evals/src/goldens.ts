@@ -1,7 +1,7 @@
 import type { ParsedQuery } from '@aptv2/schema'
 
 export type Golden = { q: string; expect: Partial<Pick<ParsedQuery,
-  'neighborhoods' | 'priceMax' | 'bedsMin' | 'bedsMax' | 'furnished' | 'shortTerm' | 'amenities'>> }
+  'neighborhoods' | 'cities' | 'priceMax' | 'bedsMin' | 'bedsMax' | 'furnished' | 'shortTerm' | 'amenities'>> }
 
 export const GOLDENS: Golden[] = [
   { q: 'pet friendly 2br under $2400 near Lake Eola with in-unit laundry', expect: { neighborhoods: ['Lake Eola Heights'], priceMax: 2400, bedsMin: 2, bedsMax: 2, amenities: ['pet friendly', 'in-unit laundry'] } },
@@ -54,4 +54,9 @@ export const GOLDENS: Golden[] = [
   { q: '4 bedroom anywhere', expect: { bedsMin: 4, bedsMax: 4 } },
   { q: 'college park 2 bed short-term', expect: { neighborhoods: ['College Park'], bedsMin: 2, bedsMax: 2, shortTerm: true } },
   { q: 'two bed balcony gym audubon park under 2400', expect: { neighborhoods: ['Audubon Park'], priceMax: 2400, bedsMin: 2, bedsMax: 2, amenities: ['balcony', 'gym'] } },
+  { q: '2br in tampa under $1900', expect: { cities: ['Tampa'], priceMax: 1900, bedsMin: 2, bedsMax: 2 } },
+  { q: 'studio in miami under 1600', expect: { cities: ['Miami'], priceMax: 1600, bedsMin: 0, bedsMax: 0 } },
+  { q: '1 bedroom jacksonville under $1500', expect: { cities: ['Jacksonville'], priceMax: 1500, bedsMin: 1, bedsMax: 1 } },
+  { q: 'furnished 2 bed tampa with a pool', expect: { cities: ['Tampa'], bedsMin: 2, bedsMax: 2, furnished: true, amenities: ['pool'] } },
+  { q: 'pet friendly studio miami under 1400', expect: { cities: ['Miami'], priceMax: 1400, bedsMin: 0, bedsMax: 0, amenities: ['pet friendly'] } },
 ]

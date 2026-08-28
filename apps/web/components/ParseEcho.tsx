@@ -13,7 +13,7 @@ function parseSourceLabel(parsed: ParsedQuery): string {
 }
 
 function chips(parsed: ParsedQuery): string[] {
-  const out: string[] = [...parsed.neighborhoods];
+  const out: string[] = [...parsed.neighborhoods, ...parsed.cities];
   if (parsed.priceMax !== null) out.push(`Under ${formatPrice(parsed.priceMax)}`);
   if (parsed.bedsMin !== null) {
     // Exact when both bounds agree ("1 bedroom" → "1 bd"); open-ended

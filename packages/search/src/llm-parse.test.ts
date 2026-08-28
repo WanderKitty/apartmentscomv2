@@ -3,6 +3,7 @@ import { __resetParseCacheForTests, parseQueryWith } from "./llm-parse";
 
 const LLM_OUT = {
   neighborhoods: ["Lake Eola Heights"],
+  cities: [],
   price_max_dollars: 2400,
   beds_min: 2,
   beds_max: 2,
