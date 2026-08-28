@@ -6,6 +6,8 @@ freshness, and served behind a natural-language search bar.
 
 Full runbook: [`apps/web/README.md`](apps/web/README.md).
 
+![Search results demo](demo-page.png)
+
 ## Automation
 
 - **CI** (`.github/workflows/ci.yml`) — typecheck, every package's test suite

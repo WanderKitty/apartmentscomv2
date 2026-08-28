@@ -20,8 +20,10 @@ export default async function Home(props: PageProps<"/">) {
   if (!q) return <Hero />;
 
   return (
-    <div className="mx-auto w-full max-w-[880px] px-6 pb-16 pt-8">
-      <SearchBar defaultValue={q} />
+    <div className="mx-auto w-full max-w-[1128px] px-6 pb-16 pt-8">
+      <div className="mx-auto max-w-[880px]">
+        <SearchBar defaultValue={q} />
+      </div>
 
       {/* The shell (search bar) paints immediately; the search itself —
           LLM parse + SQL — streams in behind the skeleton. Keyed by query
@@ -103,7 +105,7 @@ async function SearchResults({
           )}
         </div>
       ) : (
-        <ul className="divide-y divide-hairline-soft">
+        <ul className="mt-6 grid grid-cols-1 gap-x-4 gap-y-10 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           {listings.map((listing, i) => (
             <ListingCard
               key={listing.id}

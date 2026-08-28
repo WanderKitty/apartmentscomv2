@@ -15,8 +15,8 @@ describe("ListingCard", () => {
   it("shows price, freshness stamp, and net-effective rent", () => {
     render(<ListingCard listing={byId("seed___u0001")} now={NOW} />);
     expect(screen.getByText("$1,895")).toBeInTheDocument();
-    // The freshness stamp renders in both the mobile and desktop slots.
-    expect(screen.getAllByText("Confirmed 6h ago").length).toBeGreaterThan(0);
+    // One freshness stamp, floating on the photo plate.
+    expect(screen.getAllByText("Confirmed 6h ago")).toHaveLength(1);
     expect(screen.getByText(/\$1,693 net effective/)).toBeInTheDocument();
   });
 
@@ -54,6 +54,12 @@ describe("ListingCard", () => {
 
     rerender(<ListingCard listing={byId("seed___u0001")} now={NOW} />);
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("shows exactly one New tag for a day-0 listing (photo tag, no meta chip)", () => {
+    const listing = { ...byId("seed___u0001"), daysOnMarket: 0 };
+    render(<ListingCard listing={listing} now={NOW} />);
+    expect(screen.getAllByText("New")).toHaveLength(1);
   });
 
   it("hides score components unless debug is on", () => {
