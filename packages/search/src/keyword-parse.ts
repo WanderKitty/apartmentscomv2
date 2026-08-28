@@ -1,7 +1,8 @@
 import { AMENITY_KEYWORDS, FLORIDA_CITIES, NEIGHBORHOOD_ALIASES, type ParsedQuery } from "@aptv2/schema";
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const cityWordRegex = (city: string) => new RegExp(`\\b${escapeRegex(city.toLowerCase())}\\b`);
+/** Whole-word/phrase match for a literal term (city name, amenity keyword). */
+const wordRegex = (term: string) => new RegExp(`\\b${escapeRegex(term.toLowerCase())}\\b`);
 
 /** Deterministic keyword rung of the fail-open ladder (spec §6.1). */
 export function parseQueryKeywords(raw: string): ParsedQuery {
@@ -22,7 +23,7 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
       if (cityScanText.includes(a)) cityScanText = cityScanText.split(a).join(" ".repeat(a.length));
     }
   }
-  const cities = FLORIDA_CITIES.filter((c) => cityWordRegex(c).test(cityScanText));
+  const cities = FLORIDA_CITIES.filter((c) => wordRegex(c).test(cityScanText));
 
   const priceMatch = q.match(
     /(?:under|below|less than|<=?|max)\s*\$?\s*([\d,]+)\s*(k?)/,
@@ -60,8 +61,10 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
     ? true
     : null;
 
+  // Whole-word/phrase match (not q.includes(k)): a plain substring match let
+  // "washer" match inside "dishwasher", false-positiving in-unit laundry.
   const amenities = Object.entries(AMENITY_KEYWORDS)
-    .filter(([, keywords]) => keywords.some((k) => q.includes(k)))
+    .filter(([, keywords]) => keywords.some((k) => wordRegex(k).test(q)))
     .map(([name]) => name);
 
   const recognizedAnything =

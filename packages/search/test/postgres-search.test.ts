@@ -280,4 +280,37 @@ describe('postgres SearchService', () => {
     expect(r.listings.some((l) => l.beds === 1)).toBe(false) // Tampa 1bd excluded by beds
     expect(r.listings.every((l) => !l.address.includes('Orlando'))).toBe(true)
   })
+
+  // Pinned emergent behavior (reviewer-traced, accepted as-is): a keyword
+  // parse can populate BOTH neighborhoods and cities at once (e.g. "lake
+  // eola orlando" — see keyword-parse.test.ts). No real listing is both in
+  // the Lake Eola Heights neighborhood AND the city of Tampa, so this
+  // combination zeroes out and exercises the relaxation-hint path: BOTH
+  // filters are offered as independent drops, and each drop's rebuilt
+  // suggestion keeps whichever of {neighborhood, city} it did NOT strip —
+  // rebuildQuery's neighborhood-priority branch means the city drop's
+  // suggestion echoes the neighborhood and vice versa; the two never
+  // co-occur in a single suggestedQuery.
+  it('offers both neighborhood and city as independent relaxation drops when both are set, with neighborhood-priority reconstruction', async () => {
+    const p: ParsedQuery = {
+      ...parseQueryKeywords(''),
+      neighborhoods: ['Lake Eola Heights'],
+      cities: ['Tampa'],
+    }
+    const svc = createSearchService(() => pool, { parse: async () => p })
+    const r = await svc.search('lake eola orlando tampa')
+    expect(r.totalCount).toBe(0)
+    expect(r.relaxationHints).toHaveLength(2)
+
+    const dropNeighborhood = r.relaxationHints.find((h) => h.drop === 'neighborhoods')!
+    expect(dropNeighborhood).toBeDefined()
+    expect(dropNeighborhood.count).toBeGreaterThan(0)
+    expect(dropNeighborhood.suggestedQuery).toBe('in Tampa') // city survives once neighborhood is stripped
+
+    const dropCity = r.relaxationHints.find((h) => h.drop === 'city')!
+    expect(dropCity).toBeDefined()
+    expect(dropCity.label).toBe('Tampa')
+    expect(dropCity.count).toBeGreaterThan(0)
+    expect(dropCity.suggestedQuery).toBe('in Lake Eola Heights') // neighborhood priority: city never echoed here
+  })
 })
