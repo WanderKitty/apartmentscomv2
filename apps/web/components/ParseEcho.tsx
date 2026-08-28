@@ -16,7 +16,11 @@ function chips(parsed: ParsedQuery): string[] {
   const out: string[] = [...parsed.neighborhoods];
   if (parsed.priceMax !== null) out.push(`Under ${formatPrice(parsed.priceMax)}`);
   if (parsed.bedsMin !== null) {
-    out.push(parsed.bedsMin === 0 ? "Studio+" : `${parsed.bedsMin}+ bd`);
+    // Exact when both bounds agree ("1 bedroom" → "1 bd"); open-ended
+    // phrasings ("1+ br", "at least 1") keep the plus.
+    const exact = parsed.bedsMax === parsed.bedsMin;
+    if (parsed.bedsMin === 0) out.push(exact ? "Studio" : "Studio+");
+    else out.push(exact ? `${parsed.bedsMin} bd` : `${parsed.bedsMin}+ bd`);
   }
   if (parsed.furnished === true) out.push("Furnished");
   if (parsed.furnished === false) out.push("Unfurnished");

@@ -71,6 +71,20 @@ describe('postgres SearchService', () => {
     expect(r.listings.length).toBeLessThanOrEqual(500)
   })
 
+  it('a plain bed count is an EXACT match; a plus phrasing stays open-ended', async () => {
+    const exact = await service().search('1 bed')
+    expect(exact.parsed.bedsMin).toBe(1)
+    expect(exact.parsed.bedsMax).toBe(1)
+    expect(exact.listings.length).toBeGreaterThan(0)
+    for (const l of exact.listings) expect(l.beds).toBe(1)
+
+    const open = await service().search('1+ bed')
+    expect(open.parsed.bedsMin).toBe(1)
+    expect(open.parsed.bedsMax).toBeNull()
+    expect(open.listings.some((l) => l.beds >= 2)).toBe(true)
+    expect(open.listings.length).toBeGreaterThan(exact.listings.length)
+  })
+
   it('offers single-filter relaxation hints on zero results', async () => {
     // Seed corpus has no furnished listings: furnished:true zeroes any query.
     const p: ParsedQuery = {
