@@ -1,0 +1,61 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import Anthropic from '@anthropic-ai/sdk'
+import { z } from 'zod'
+import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
+import { describe, expect, it } from 'vitest'
+import { parseEntrataPayload } from '@aptv2/scrapers'
+import { createHaikuEnricher } from '@aptv2/pipeline'
+
+const KEY = process.env.ANTHROPIC_API_KEY
+
+const Verdict = z.object({
+  fields: z.array(
+    z.object({
+      field: z.string(),
+      verdict: z.enum(['supported', 'not_in_text', 'contradicted']),
+      note: z.string(),
+    }),
+  ),
+})
+
+describe.skipIf(!KEY)('extraction sampling judged by claude-sonnet-5', () => {
+  it('no extracted field contradicts its source text', async () => {
+    const payload = JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL('../../scrapers/fixtures/entrata-availability.json', import.meta.url)),
+        'utf8',
+      ),
+    )
+    const units = parseEntrataPayload(payload)
+      .filter((u) => [...u.amenityTexts, ...u.marketingTexts].some((t) => t.trim()))
+      .slice(0, 12)
+    expect(units.length).toBeGreaterThanOrEqual(3) // sample floor; raise the cap as the corpus grows
+    const enrich = createHaikuEnricher()!
+    const judgeClient = new Anthropic()
+    const contradictions: string[] = []
+    for (const u of units) {
+      const texts = [...u.amenityTexts, ...u.marketingTexts]
+      const enrichment = await enrich(texts)
+      if (!enrichment) continue // model found nothing to extract — nothing to judge
+      const res = await judgeClient.messages.parse({
+        model: 'claude-sonnet-5',
+        max_tokens: 1024,
+        system:
+          'You verify data extraction. For each extracted field, judge strictly against ONLY the source texts: supported (text states it), not_in_text (extractor should have said null/not_mentioned), or contradicted (text says otherwise).',
+        messages: [
+          {
+            role: 'user',
+            content: `SOURCE TEXTS:\n${texts.join('\n')}\n\nEXTRACTED:\n${JSON.stringify(enrichment, null, 2)}`,
+          },
+        ],
+        output_config: { format: zodOutputFormat(Verdict) },
+      })
+      for (const f of res.parsed_output?.fields ?? []) {
+        if (f.verdict === 'contradicted') contradictions.push(`${u.externalId}.${f.field}: ${f.note}`)
+      }
+    }
+    console.log(contradictions.join('\n') || 'no contradictions')
+    expect(contradictions).toEqual([])
+  })
+})
