@@ -147,6 +147,7 @@ async function SearchResults({
                 <li key={h.drop}>
                   <Link
                     href={`/?q=${encodeURIComponent(h.suggestedQuery)}`}
+                    data-testid="relaxation-hint"
                     className="block rounded-card border border-hairline px-4 py-2 text-[14px] text-body hover:border-ink hover:text-ink"
                   >
                     removing <span className="font-semibold">{h.label}</span>{" "}

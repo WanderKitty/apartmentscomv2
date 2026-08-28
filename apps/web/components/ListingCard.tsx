@@ -40,6 +40,7 @@ export function ListingCard({
     >
       <Link
         href={`/listing/${listing.id}`}
+        data-testid="listing-card"
         className="group flex gap-4 rounded-card p-3 transition-shadow duration-[var(--duration-micro)] hover:shadow-tier"
       >
         <div className="relative flex size-28 shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-surface-strong sm:size-32">
