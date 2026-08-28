@@ -39,7 +39,7 @@ function Frame({ img, alt, className = "" }: { img: string; alt: string; classNa
         <span className="size-2.5 rounded-full bg-hairline" />
       </div>
       <div className="flex h-[calc(100%-33px)] items-center justify-center p-4">
-        <img src={img} alt={alt} className="max-h-full max-w-full object-contain" />
+        <img src={img} alt={alt} loading="lazy" className="max-h-full max-w-full object-contain" />
       </div>
     </div>
   );

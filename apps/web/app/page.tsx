@@ -30,7 +30,7 @@ export default async function Home(props: PageProps<"/">) {
             Every listing, straight from the property.
           </h1>
           <p className="mx-auto mt-3 max-w-[560px] text-center text-[16px] leading-6 text-muted">
-            Orlando apartments scraped daily from community websites — prices
+            Orlando apartments scraped 3×/day from community websites — prices
             timestamped, concessions decoded, nothing rehosted.
           </p>
 

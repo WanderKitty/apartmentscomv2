@@ -34,6 +34,14 @@ describe("buildSuggestions", () => {
     expect(s[0]!.apply).toBe("1br with pool");
   });
 
+  it("does not complete bare connective words like 'in'", () => {
+    // "2 bed in" must not offer "2 bed in-unit laundry".
+    const s = buildSuggestions("2 bed in");
+    expect(s.find((x) => x.label === "in-unit laundry")).toBeUndefined();
+    // …but an explicit fragment still matches.
+    expect(buildSuggestions("2 bed in-u")[0]!.label).toBe("in-unit laundry");
+  });
+
   it("returns nothing for an unmatched fragment", () => {
     expect(buildSuggestions("zzzqqq")).toEqual([]);
   });

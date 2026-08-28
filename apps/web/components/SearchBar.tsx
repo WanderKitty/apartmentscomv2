@@ -1,6 +1,6 @@
 "use client";
 import Form from "next/form";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { buildSuggestions, type Suggestion } from "@/lib/suggest";
 import { SearchButton } from "./SearchButton";
 
@@ -21,6 +21,7 @@ export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
 
   const suggestions = open ? buildSuggestions(value) : [];
   const showList = open && suggestions.length > 0;
@@ -30,7 +31,14 @@ export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
     setOpen(false);
     setActive(-1);
     // Accepting a suggestion is an intent to search — submit right away.
-    inputRef.current?.form?.requestSubmit?.();
+    // The DOM value must be written BEFORE requestSubmit: next/form reads
+    // FormData synchronously inside the submit event, and React's state
+    // update won't have flushed to the controlled input yet.
+    const input = inputRef.current;
+    if (input) {
+      input.value = s.apply;
+      input.form?.requestSubmit?.();
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -54,6 +62,12 @@ export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
     <div className="relative">
       <Form
         action="/"
+        onSubmit={() => {
+          // Any submission (Enter with no highlight included) closes the
+          // list — it would otherwise linger over the streamed-in results.
+          setOpen(false);
+          setActive(-1);
+        }}
         className="flex h-16 w-full items-center gap-2 rounded-full border border-hairline bg-canvas py-2 pl-6 pr-2 shadow-tier transition-shadow duration-[var(--duration-micro)] focus-within:shadow-[0_0_0_2px_var(--color-ink),var(--shadow-tier)]"
       >
         <input
@@ -77,7 +91,8 @@ export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
           aria-label="Search Orlando apartments"
           role="combobox"
           aria-expanded={showList}
-          aria-controls="search-suggestions"
+          aria-controls={listId}
+          aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
           aria-autocomplete="list"
           autoComplete="off"
           className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-ink outline-none placeholder:text-muted-soft"
@@ -87,7 +102,7 @@ export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
 
       {showList && (
         <ul
-          id="search-suggestions"
+          id={listId}
           role="listbox"
           aria-label="Search suggestions"
           className="absolute inset-x-3 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-hairline-soft bg-canvas py-2 shadow-tier"
@@ -95,6 +110,7 @@ export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
           {suggestions.map((s, i) => (
             <li
               key={`${s.kind}:${s.label}`}
+              id={`${listId}-${i}`}
               role="option"
               aria-selected={i === active}
               onMouseDown={(e) => {

@@ -49,11 +49,16 @@ export function buildSuggestions(input: string, limit = 6): Suggestion[] {
     if (raw[i] !== " " && (i === 0 || raw[i - 1] === " ")) wordStarts.push(i);
   }
 
+  // Connective words a query naturally passes through ("2 bed in …") —
+  // completing them mid-thought produces nonsense like "in-unit laundry".
+  const STOPWORDS = new Set(["in", "near", "with", "under", "a", "an", "the", "and", "at"]);
+
   const out: Suggestion[] = [];
   const seen = new Set<string>();
   for (const start of wordStarts) {
     const fragment = lower.slice(start);
     if (fragment.length < 2 && trimmed.length > 1) continue;
+    if (STOPWORDS.has(fragment) && start > 0) continue;
     for (const c of CANDIDATES) {
       if (seen.has(c.label)) continue;
       if (!c.terms.some((t) => t.startsWith(fragment))) continue;
