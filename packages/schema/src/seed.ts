@@ -403,6 +403,8 @@ export function toListing(u: ProcessedUnitData, now: Date): Listing {
     events: u.events.map((e) => ({ at: e.at, kind: e.kind, fromCents: e.from_cents, toCents: e.to_cents, note: e.note })),
     alsoListedOn: [],
     dedupCluster: u.liberal_dedup_cluster,
+    lat: u.latitude,
+    lng: u.longitude,
     trueCost: trueCostOf(u),
     provenance: u.data_provenance,
     daysOnMarket: u.days_on_market ?? Math.max(0, Math.round((now.getTime() - new Date(u.first_seen_at).getTime()) / 86_400_000)),

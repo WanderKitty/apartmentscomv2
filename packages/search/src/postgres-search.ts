@@ -41,6 +41,7 @@ FROM (
     p.name AS property_name, p.address_line1, p.city, p.state, p.zip,
     p.amenities AS community_amenities,
     n.name AS neighborhood_name,
+    ST_Y(l.location::geometry) AS lat, ST_X(l.location::geometry) AS lng,
     CASE WHEN $7 <> ''
          THEN LEAST(1.0, ts_rank(l.search_tsv, plainto_tsquery('english', $7))::float8 * 10)
          ELSE 0 END AS text_rel,
@@ -92,6 +93,7 @@ SELECT
   p.name AS property_name, p.address_line1, p.city, p.state, p.zip,
   p.amenities AS community_amenities,
   n.name AS neighborhood_name,
+  ST_Y(l.location::geometry) AS lat, ST_X(l.location::geometry) AS lng,
   0::float8 AS text_rel,
   power(0.5, EXTRACT(EPOCH FROM (now() - l.last_confirmed_at))::float8 / ${FRESHNESS_HALF_LIFE_SECONDS}) AS freshness,
   0::float8 AS proximity,
@@ -145,6 +147,8 @@ type Row = {
   zip: string
   community_amenities: string[]
   neighborhood_name: string | null
+  lat: number | null
+  lng: number | null
   text_rel: number
   freshness: number
   proximity: number
@@ -222,6 +226,8 @@ function rowToListing(row: Row, now: Date): Listing {
     daysOnMarket: Math.max(0, Math.round((now.getTime() - row.first_listed_at.getTime()) / 86_400_000)),
     alsoListedOn: [],
     dedupCluster: row.dedup_cluster,
+    lat: row.lat,
+    lng: row.lng,
   }
 }
 
@@ -355,13 +361,22 @@ export function createSearchService(
       const pool = getPool()
       const parsed = await parse(rawQuery)
       const t0 = performance.now()
-      const [{ rows }, corpusRes] = await Promise.all([
+      const [{ rows }, corpusRes, boundaryRes] = await Promise.all([
         pool.query<Row>(SEARCH_SQL, searchParams(parsed)),
         pool.query<{ seed: number; scraped: number }>(
           `SELECT count(*) FILTER (WHERE provenance = 'seed')::int AS seed,
                   count(*) FILTER (WHERE provenance = 'scraped')::int AS scraped
            FROM listings WHERE status = 'active'`,
         ),
+        // Map overlay: only when the parse matched neighborhoods, so the
+        // common path pays zero extra queries.
+        parsed.neighborhoods.length > 0
+          ? pool.query<{ name: string; geojson: string }>(
+              `SELECT name, ST_AsGeoJSON(boundary) AS geojson
+               FROM neighborhoods WHERE name = ANY($1::text[])`,
+              [parsed.neighborhoods],
+            )
+          : null,
       ])
       const collapsed = collapseDuplicates(rows.map((r) => rowToListing(r, now)))
       // Zero results with active filters: tell the visitor which SINGLE
@@ -402,6 +417,10 @@ export function createSearchService(
         parsed,
         totalCount: collapsed.length,
         relaxationHints,
+        neighborhoodBoundaries: (boundaryRes?.rows ?? []).map((b) => ({
+          name: b.name,
+          geojson: JSON.parse(b.geojson),
+        })),
         timing: {
           parseMs: parsed.parseMs,
           searchMs,
