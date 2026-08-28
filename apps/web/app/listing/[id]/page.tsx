@@ -47,6 +47,7 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
           <img
             src={listing.photoUrl}
             alt={`${listing.propertyName} floorplan`}
+            referrerPolicy="no-referrer"
             className="img-enter size-full object-contain"
           />
           <a

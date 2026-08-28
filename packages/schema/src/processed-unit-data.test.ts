@@ -36,7 +36,14 @@ describe("ProcessedUnitDataSchema", () => {
     expect(() => ProcessedUnitDataSchema.parse(bad)).toThrow();
   });
 
-  it("field count is ~90 (93 as authored)", () => {
+  it("rejects non-http(s) image_url schemes (img-src sink hardening)", () => {
+    for (const url of ["javascript:alert(1)", "data:text/html,hi"]) {
+      const bad = { ...minimalUnit(), image_url: url };
+      expect(() => ProcessedUnitDataSchema.parse(bad)).toThrow();
+    }
+  });
+
+  it("field count is ~90 (94 as authored)", () => {
     const n = Object.keys(ProcessedUnitDataSchema.shape).length;
     expect(n).toBeGreaterThanOrEqual(60);
     // Sanity rail, not a target — never trim real fields to fit it.

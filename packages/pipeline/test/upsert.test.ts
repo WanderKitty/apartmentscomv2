@@ -84,6 +84,16 @@ describe('upsertProcessedUnits', () => {
       [withImage.collapse_key],
     )
     expect(after[0].image_url).toBe('https://example.com/floorplans/a1-v2.jpg')
+
+    // The COALESCE invariant: a cycle WITHOUT an image must keep the
+    // known image, not erase it.
+    await upsertProcessedUnits(pool, [{ ...withImage, image_url: null }])
+    const { rows: kept } = await pool.query(
+      `SELECT u.image_url FROM listings l JOIN units u ON u.id = l.unit_id
+       WHERE l.collapse_key = $1`,
+      [withImage.collapse_key],
+    )
+    expect(kept[0].image_url).toBe('https://example.com/floorplans/a1-v2.jpg')
   })
 
   it('models the cross-platform pair as one unit, two listings, one cluster', async () => {

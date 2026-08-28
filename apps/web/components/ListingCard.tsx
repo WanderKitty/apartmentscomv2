@@ -50,6 +50,7 @@ export function ListingCard({
               src={listing.photoUrl}
               alt={`${listing.propertyName} floorplan`}
               loading="lazy"
+              referrerPolicy="no-referrer"
               className="img-enter size-full bg-white object-contain p-1.5 transition-transform duration-[var(--duration-micro)] ease-[var(--ease-glide)] group-hover:scale-[1.05]"
             />
           ) : (

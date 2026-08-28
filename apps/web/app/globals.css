@@ -69,7 +69,8 @@ body {
   animation-delay: min(calc(var(--i, 0) * 35ms), 350ms);
 }
 
-/* Image fade-in: smooths the pop when a lazy photo arrives. */
+/* Image fade-in on DOM insertion (an image that loads later than the
+   animation still pops in — acceptable; a load-gated fade needs JS). */
 @keyframes img-in {
   from {
     opacity: 0;

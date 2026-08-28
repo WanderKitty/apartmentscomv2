@@ -117,6 +117,20 @@ describe('extractSnapshot', () => {
     )
   })
 
+  it('a non-http(s) image degrades to image_url null — never fails the unit', async () => {
+    // Clone the embedded payload and poison one unit's thumbnail with a
+    // scheme the schema (rightly) refuses for an <img src> sink.
+    const poisoned = structuredClone(embeddedPayload)
+    poisoned.units[0].thumbnail = { src: 'javascript:alert(1)' }
+    const { units, failures } = await extractSnapshot(pool, {
+      snapshot: { id: 62, source_id: EMBEDDED_SOURCE.id, payload: poisoned },
+      source: EMBEDDED_SOURCE, now: NOW, llm: null,
+    })
+    expect(failures).toEqual([])
+    expect(units.length).toBe(137)
+    expect(units[0]!.image_url).toBeNull()
+  })
+
   it('applies LLM enrichment when the enricher returns values, and caches by content hash', async () => {
     // units[12] (floorplan ID 2139, "The Three Balcony") is the fixture
     // unit that carries free text (banner "Limited Availability" + tags)
