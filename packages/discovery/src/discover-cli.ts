@@ -158,7 +158,11 @@ if (isMain) {
   const concurrencyIdx = args.indexOf('--concurrency')
   const concurrency =
     concurrencyIdx >= 0 && Number(args[concurrencyIdx + 1]) > 0 ? Number(args[concurrencyIdx + 1]) : 8
-  const candidatesArg = args.find((a, i) => !a.startsWith('--') && i !== concurrencyIdx + 1)
+  // Only exclude the flag's VALUE index when the flag is actually present —
+  // concurrencyIdx + 1 is 0 when absent, which would swallow the candidates
+  // path itself (the CI failure: bare invocation printed usage and exited).
+  const flagValueIndexes = new Set(concurrencyIdx >= 0 ? [concurrencyIdx + 1] : [])
+  const candidatesArg = args.find((a, i) => !a.startsWith('--') && !flagValueIndexes.has(i))
   if (!candidatesArg) {
     console.error('usage: discover-cli <candidates-file.json> [--concurrency N]')
     process.exit(1)
