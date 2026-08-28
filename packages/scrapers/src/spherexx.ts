@@ -82,6 +82,12 @@ export function extractSpherexxCards(html: string): SpherexxCard[] {
 
 const dollarsToCents = (d: number): number => Math.round(d * 100)
 
+// Spherexx emits price 0 as its no-current-pricing sentinel; a zero (or
+// negative) dollar figure is "undisclosed", never a real rent. Applied at
+// the parse stage so stored payloads repair on reprocess.
+const priceOrNull = (d: number | null | undefined): number | null =>
+  d == null || d <= 0 ? null : d
+
 /** Maps the extracted cards onto the shared scraper unit record. */
 export function parseSpherexxPayload(payload: unknown, baseUrl?: string): EntrataUnit[] {
   if (!Array.isArray(payload)) {
@@ -96,16 +102,19 @@ export function parseSpherexxPayload(payload: unknown, baseUrl?: string): Entrat
     if (!c.fp || !c.name || typeof c.beds !== 'number' || typeof c.baths !== 'number') {
       throw new EntrataPayloadError('spherexx card missing fp/name/beds/baths')
     }
+    const minPrice = priceOrNull(c.minPriceDollars)
+    const maxPrice = priceOrNull(c.maxPriceDollars)
+    const basePrice = priceOrNull(c.basePriceDollars)
     const marketing: string[] = [`${c.unitsAvailable} unit(s) available`]
     // The fee split IS the honest-pricing story — hand it to extraction as
     // structured-ish text so the true-cost math can use it.
-    if (c.basePriceDollars != null && c.feeTotalDollars != null && c.feeTotalDollars > 0) {
+    if (basePrice != null && c.feeTotalDollars != null && c.feeTotalDollars > 0) {
       marketing.push(
-        `Base rent $${c.basePriceDollars}/mo plus $${c.feeTotalDollars}/mo mandatory fees`,
+        `Base rent $${basePrice}/mo plus $${c.feeTotalDollars}/mo mandatory fees`,
       )
     }
-    if (c.minPriceDollars != null && c.maxPriceDollars != null && c.maxPriceDollars > c.minPriceDollars) {
-      marketing.push(`advertised range $${c.minPriceDollars}–$${c.maxPriceDollars}/mo`)
+    if (minPrice != null && maxPrice != null && maxPrice > minPrice) {
+      marketing.push(`advertised range $${minPrice}–$${maxPrice}/mo`)
     }
     units.push({
       externalId: String(c.fp),
@@ -114,7 +123,7 @@ export function parseSpherexxPayload(payload: unknown, baseUrl?: string): Entrat
       beds: c.beds,
       baths: c.baths,
       sqft: c.sqft ?? null,
-      rentCents: c.minPriceDollars == null ? null : dollarsToCents(c.minPriceDollars),
+      rentCents: minPrice == null ? null : dollarsToCents(minPrice),
       rentSpecialCents: null,
       availableOn: null,
       amenityTexts: [],
