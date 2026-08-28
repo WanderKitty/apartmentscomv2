@@ -1,37 +1,21 @@
-// Seed listings in one neighborhood share the neighborhood-centroid
-// coordinate, which would stack their map pins invisibly. Spread exact
-// collisions in a small deterministic ring (~110m); unique coordinates
-// pass through untouched, so real per-property coords are never moved.
-
-const RING_RADIUS_DEG = 0.001;
+// A scraped property lists every unit at the building's single
+// coordinate, and seed listings share neighborhood centroids — so pins
+// are grouped: one pin per exact coordinate, carrying every listing at
+// that spot (the pin label and popup present the group). Coordinates
+// are never moved.
 
 export type PinInput = { id: string; lat: number | null; lng: number | null };
-export type Pin = { id: string; lat: number; lng: number };
+export type PinGroup = { lat: number; lng: number; ids: string[] };
 
-export function pinPositions(listings: PinInput[]): Pin[] {
-  const groups = new Map<string, PinInput[]>();
-  const located = listings.filter((l): l is PinInput & Pin => l.lat !== null && l.lng !== null);
-  for (const l of located) {
+export function groupPins(listings: PinInput[]): PinGroup[] {
+  const byCoord = new Map<string, PinGroup>();
+  for (const l of listings) {
+    if (l.lat === null || l.lng === null) continue;
     const key = `${l.lat},${l.lng}`;
-    groups.set(key, [...(groups.get(key) ?? []), l]);
+    const group = byCoord.get(key);
+    if (group) group.ids.push(l.id);
+    else byCoord.set(key, { lat: l.lat, lng: l.lng, ids: [l.id] });
   }
-  const spread = new Map<string, Pin>();
-  for (const group of groups.values()) {
-    if (group.length === 1) {
-      const [l] = group as Pin[];
-      spread.set(l!.id, { id: l!.id, lat: l!.lat, lng: l!.lng });
-      continue;
-    }
-    const ordered = [...(group as Pin[])].sort((a, b) => a.id.localeCompare(b.id));
-    ordered.forEach((l, i) => {
-      const angle = (2 * Math.PI * i) / ordered.length;
-      spread.set(l.id, {
-        id: l.id,
-        lat: l.lat + RING_RADIUS_DEG * Math.sin(angle),
-        lng: l.lng + RING_RADIUS_DEG * Math.cos(angle),
-      });
-    });
-  }
-  // Preserve the caller's (ranking) order.
-  return located.map((l) => spread.get(l.id)!);
+  // Map preserves insertion order = the caller's (ranking) order.
+  return [...byCoord.values()];
 }
