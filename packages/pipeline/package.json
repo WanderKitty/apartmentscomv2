@@ -6,12 +6,16 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "seed": "tsx src/seed-cli.ts"
+    "seed": "tsx src/seed-cli.ts",
+    "seed:sources": "tsx src/seed-sources-cli.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.121.0",
     "@aptv2/db": "workspace:*",
     "@aptv2/schema": "workspace:*",
-    "pg": "^8.13.0"
+    "@aptv2/scrapers": "workspace:*",
+    "pg": "^8.13.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0",

@@ -1,7 +1,9 @@
 import { config } from 'dotenv'
 import { fileURLToPath } from 'node:url'
+import { getPool } from '@aptv2/db'
 import { createBoss } from './boss'
 import { registerJobs, HEARTBEAT } from './jobs/heartbeat'
+import { registerIngestionJobs } from './jobs/scrape'
 
 config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) })
 
@@ -17,4 +19,8 @@ await boss.work(HEARTBEAT, async ([job]) => {
   console.log('[heartbeat]', job!.id, job!.data)
 })
 await boss.schedule(HEARTBEAT, '*/15 * * * *', {})
-console.log('Worker started; heartbeat scheduled every 15 minutes')
+
+const pool = getPool()
+await registerIngestionJobs(boss, pool)
+
+console.log('Worker started; heartbeat scheduled every 15 minutes; ingestion jobs registered')

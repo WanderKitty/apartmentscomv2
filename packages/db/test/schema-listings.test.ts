@@ -31,8 +31,8 @@ describe('listings schema', () => {
   it('inserts a listing and auto-generates the tsvector', async () => {
     const { rows } = await pool.query(
       `INSERT INTO listings
-         (unit_id, property_id, location, price_cents, search_text)
-       VALUES ($1, $2, ST_GeogFromText('POINT(-81.376 28.545)'), 185000,
+         (unit_id, property_id, collapse_key, location, price_cents, search_text)
+       VALUES ($1, $2, 'test:vue-a2', ST_GeogFromText('POINT(-81.376 28.545)'), 185000,
                'Furnished two bedroom with pool view, walkable to Lake Eola')
        RETURNING *`,
       [unitId, propertyId],

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Pool } from 'pg'
 import { resetTestDb } from '@aptv2/db/test-helpers'
 import { buildSeedUnits } from '@aptv2/schema'
-import { seedNeighborhoods, upsertProcessedUnits } from '../src/index'
+import { seedNeighborhoods, upsertProcessedUnits, bumpConfirmed, sweepVanished } from '../src/index'
 
 const NOW = new Date('2026-08-27T12:00:00.000Z')
 
@@ -82,5 +82,147 @@ describe('upsertProcessedUnits', () => {
     expect(rows[0].lease_term).toBe('unknown')
     expect(rows[0].price_changes).toBe(2)
     expect(rows[0].price_history[0]).toHaveProperty('from_cents')
+  })
+})
+
+describe('ingestion helpers', () => {
+  it('spatial neighborhood fallback: empty-name record inside the Lake Eola bbox resolves', async () => {
+    const u = {
+      ...buildSeedUnits(NOW)[0]!,
+      source_id: 'entrata___spatial-test-1',
+      collapse_key: 'entrata:spatial-test-1',
+      liberal_dedup_cluster: 'orlando:spatial-test-1',
+      neighborhood: '',
+      platform: 'entrata' as const,
+      data_provenance: 'scraped' as const,
+    }
+    const { rows: src } = await pool.query(
+      `INSERT INTO sources (platform, name, website_url) VALUES ('entrata','Spatial Test','https://example.com/spatial')
+       ON CONFLICT (website_url) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+    )
+    await upsertProcessedUnits(pool, [u], { sourceRef: src[0].id })
+    const { rows } = await pool.query(
+      `SELECT l.source_ref, n.name FROM listings l JOIN neighborhoods n ON n.id = l.neighborhood_id
+       WHERE l.collapse_key = 'entrata:spatial-test-1'`,
+    )
+    expect(rows[0].source_ref).toBe(src[0].id)
+    expect(rows[0].name).toBe('Lake Eola Heights') // seed unit 1's coords sit in the Eola bbox
+  })
+
+  it('price history accumulates across upserts instead of being overwritten', async () => {
+    const base = {
+      ...buildSeedUnits(NOW)[0]!,
+      source_id: 'entrata___pricehist-1',
+      collapse_key: 'entrata:pricehist-1',
+      liberal_dedup_cluster: 'orlando:pricehist-1',
+      platform: 'entrata' as const,
+      data_provenance: 'scraped' as const,
+      advertised_rent_cents: 200000,
+      net_effective_monthly_cents: null,
+      concession_type: 'not_mentioned' as const,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: 200000, note: null }],
+    }
+    await upsertProcessedUnits(pool, [base])
+    // Second scrape cycle: rent dropped $150.
+    await upsertProcessedUnits(pool, [{
+      ...base,
+      advertised_rent_cents: 185000,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: 185000, note: null }],
+    }])
+    const { rows } = await pool.query(
+      `SELECT price_cents, events, price_history, price_changes FROM listings WHERE collapse_key = 'entrata:pricehist-1'`,
+    )
+    const r = rows[0]
+    expect(r.price_cents).toBe(185000)
+    const priceEvents = r.events.filter((e: { kind: string }) => e.kind === 'price_drop' || e.kind === 'price_increase')
+    expect(priceEvents).toHaveLength(1)
+    expect(priceEvents[0]).toMatchObject({ kind: 'price_drop', from_cents: 200000, to_cents: 185000 })
+    expect(r.events[0].kind).toBe('first_listed') // prior history survived
+    expect(r.price_history).toHaveLength(1)
+    expect(r.price_history[0]).toMatchObject({ from_cents: 200000, to_cents: 185000 })
+    expect(r.price_changes).toBe(1)
+    // Third cycle, unchanged price: nothing appended.
+    await upsertProcessedUnits(pool, [{ ...base, advertised_rent_cents: 185000 }])
+    const again = await pool.query(`SELECT events, price_changes FROM listings WHERE collapse_key = 'entrata:pricehist-1'`)
+    expect(again.rows[0].events).toHaveLength(r.events.length)
+    expect(again.rows[0].price_changes).toBe(1)
+  })
+
+  it('a price increase appends kind price_increase with correct from/to', async () => {
+    const base = {
+      ...buildSeedUnits(NOW)[0]!,
+      source_id: 'entrata___priceinc-1',
+      collapse_key: 'entrata:priceinc-1',
+      liberal_dedup_cluster: 'orlando:priceinc-1',
+      platform: 'entrata' as const,
+      data_provenance: 'scraped' as const,
+      advertised_rent_cents: 150000,
+      net_effective_monthly_cents: null,
+      concession_type: 'not_mentioned' as const,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: 150000, note: null }],
+    }
+    await upsertProcessedUnits(pool, [base])
+    // Second scrape cycle: rent went up $120.
+    await upsertProcessedUnits(pool, [{
+      ...base,
+      advertised_rent_cents: 162000,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: 162000, note: null }],
+    }])
+    const { rows } = await pool.query(
+      `SELECT price_cents, events, price_history, price_changes FROM listings WHERE collapse_key = 'entrata:priceinc-1'`,
+    )
+    const r = rows[0]
+    expect(r.price_cents).toBe(162000)
+    const priceEvents = r.events.filter((e: { kind: string }) => e.kind === 'price_drop' || e.kind === 'price_increase')
+    expect(priceEvents).toHaveLength(1)
+    expect(priceEvents[0]).toMatchObject({ kind: 'price_increase', from_cents: 150000, to_cents: 162000 })
+    expect(r.price_history).toHaveLength(1)
+    expect(r.price_history[0]).toMatchObject({ from_cents: 150000, to_cents: 162000 })
+    expect(r.price_changes).toBe(1)
+  })
+
+  it('a null-to-non-null price transition appends nothing but still updates price_cents', async () => {
+    const base = {
+      ...buildSeedUnits(NOW)[0]!,
+      source_id: 'entrata___pricenull-1',
+      collapse_key: 'entrata:pricenull-1',
+      liberal_dedup_cluster: 'orlando:pricenull-1',
+      platform: 'entrata' as const,
+      data_provenance: 'scraped' as const,
+      advertised_rent_cents: null,
+      net_effective_monthly_cents: null,
+      concession_type: 'not_mentioned' as const,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: null, note: null }],
+    }
+    await upsertProcessedUnits(pool, [base])
+    // Second scrape cycle: price becomes known — the null→non-null edge is unclassifiable, not a "change".
+    await upsertProcessedUnits(pool, [{
+      ...base,
+      advertised_rent_cents: 175000,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: 175000, note: null }],
+    }])
+    const { rows } = await pool.query(
+      `SELECT price_cents, events, price_history, price_changes FROM listings WHERE collapse_key = 'entrata:pricenull-1'`,
+    )
+    const r = rows[0]
+    expect(r.price_cents).toBe(175000)
+    const priceEvents = r.events.filter((e: { kind: string }) => e.kind === 'price_drop' || e.kind === 'price_increase')
+    expect(priceEvents).toHaveLength(0)
+    expect(r.price_history).toHaveLength(0)
+    expect(r.price_changes).toBe(0)
+  })
+
+  it('bumpConfirmed and sweepVanished implement the confirm/stale/gone ladder', async () => {
+    const { rows: src } = await pool.query(`SELECT id FROM sources WHERE website_url = 'https://example.com/spatial'`)
+    const ref = src[0].id
+    const bumped = await bumpConfirmed(pool, ref, new Date('2026-08-28T12:00:00.000Z'))
+    expect(bumped).toBe(1)
+
+    const s1 = await sweepVanished(pool, ref, []) // not seen → stale
+    expect(s1).toEqual({ staled: 1, gone: 0 })
+    const s2 = await sweepVanished(pool, ref, []) // still not seen → gone
+    expect(s2).toEqual({ staled: 0, gone: 1 })
+    const { rows } = await pool.query(`SELECT status FROM listings WHERE collapse_key = 'entrata:spatial-test-1'`)
+    expect(rows[0].status).toBe('gone')
   })
 })
