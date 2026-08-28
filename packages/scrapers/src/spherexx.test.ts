@@ -2,7 +2,14 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { EntrataPayloadError } from './entrata'
-import { extractSpherexxCards, parseSpherexxPayload, spherexxAdapter } from './spherexx'
+import {
+  extractSpherexxCards,
+  extractSpherexxDetails,
+  parseSpherexxPayload,
+  spherexxAdapter,
+  type SpherexxCard,
+  type SpherexxCommunity,
+} from './spherexx'
 import type { SourceRow } from './types'
 import type { PoliteFetcher } from './politeness'
 
@@ -11,6 +18,10 @@ import type { PoliteFetcher } from './politeness'
 // request). Test fixture only; tests never touch the network.
 const html = readFileSync(
   fileURLToPath(new URL('../fixtures/spherexx-floorplans.html', import.meta.url)),
+  'utf8',
+)
+const detailHtml = readFileSync(
+  fileURLToPath(new URL('../fixtures/spherexx-detail.html', import.meta.url)),
   'utf8',
 )
 
@@ -69,21 +80,41 @@ describe('parseSpherexxPayload', () => {
   })
 })
 
-describe('spherexxAdapter', () => {
-  it('fetches the page once and hashes the EXTRACTED cards (not the raw HTML)', async () => {
+describe("spherexxAdapter", () => {
+  it("walks detail pages: merges plan prose + community facts into the payload", async () => {
     const fetcher: PoliteFetcher = {
       fetchText: async (url: string) => {
-        expect(url).toBe(SOURCE.endpoint_config.endpoint_url)
-        return { status: 200, body: html }
+        if (url === SOURCE.endpoint_config.endpoint_url) return { status: 200, body: html }
+        if (url.endsWith("/floorplans/2bedroom/the-flagler-north/")) return { status: 200, body: detailHtml }
+        return { status: 200, body: "<html><body>no structured data</body></html>" }
       },
       fetchJson: async () => {
-        throw new Error('spherexx adapter must use fetchText, never fetchJson')
+        throw new Error("spherexx adapter must use fetchText, never fetchJson")
       },
     }
     const snap = await spherexxAdapter.fetch(SOURCE, fetcher)
-    expect(snap.source_id).toBe(9)
     expect(snap.content_hash).toMatch(/^[0-9a-f]{64}$/)
-    expect(Array.isArray(snap.payload)).toBe(true)
-    expect((snap.payload as unknown[]).length).toBe(4)
+    const payload = snap.payload as { cards: SpherexxCard[]; community: SpherexxCommunity }
+    expect(payload.cards).toHaveLength(4)
+    const flagler = payload.cards.find((c) => c.name === "The Flagler North")!
+    expect(flagler.description).toContain("expansive two bedroom")
+    expect(payload.community.petsAllowed).toBe(true)
+    expect(payload.community.amenities).toContain("Rooftop Sundeck")
+
+    const units = parseSpherexxPayload(snap.payload, SOURCE.endpoint_config.endpoint_url)
+    const u = units.find((x) => x.externalId === "20547")!
+    expect(u.marketingTexts.some((s) => s.includes("expansive two bedroom"))).toBe(true)
+    expect(u.marketingTexts).toContain("Pets allowed")
+    expect(u.amenityTexts).toContain("Rooftop Sundeck")
+  })
+})
+
+describe("extractSpherexxDetails (golden, from the captured detail fixture)", () => {
+  it("pulls the Floorplan description and the ApartmentComplex facts", () => {
+    const { planDescriptions, community } = extractSpherexxDetails(detailHtml)
+    expect(planDescriptions.get("The Flagler North")).toContain("expansive two bedroom")
+    expect(community.petsAllowed).toBe(true)
+    expect(community.amenities.length).toBeGreaterThan(3)
+    expect(community.description).toContain("55 West")
   })
 })
