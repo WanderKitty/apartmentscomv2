@@ -14,6 +14,15 @@ test("home page offers search and example queries", async ({ page, searchPage })
   ).toBeVisible();
 });
 
+test("blank query still shows the hero, not an empty result page", async ({ page }) => {
+  await page.goto("/?q=%20");
+  await expect(
+    page.getByRole("heading", {
+      name: "Every listing, straight from the property.",
+    }),
+  ).toBeVisible();
+});
+
 test("canonical demo query returns 2 listings with honest parse chips", async ({
   page,
   searchPage,
