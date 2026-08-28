@@ -1,6 +1,5 @@
 import type { Locator, Page, Response } from "@playwright/test";
 
-/** The listing detail route: trust signals, money math, outbound links. */
 export class ListingPage {
   readonly heading: Locator;
   readonly outboundLink: Locator;

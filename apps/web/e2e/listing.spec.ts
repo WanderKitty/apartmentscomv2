@@ -24,7 +24,6 @@ test("price-drop seed exemplar shows history and net-effective math", async ({
   page,
   listingPage,
 }) => {
-  // seed___u0003: "starting at" studio with 2 price drops + 1 month free.
   await listingPage.open("seed___u0003");
   await expect(
     page.getByText("“Starting at” price — actual units may cost more."),

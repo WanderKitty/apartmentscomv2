@@ -22,7 +22,6 @@ const Verdict = z.object({
 type TextedUnit = { amenityTexts: string[]; marketingTexts: string[] }
 const hasTexts = (u: TextedUnit) => [...u.amenityTexts, ...u.marketingTexts].some((t) => t.trim())
 
-/** Many units share identical marketing copy; judging duplicates wastes the sample budget. */
 function uniqueByTexts<T extends TextedUnit>(units: T[]): T[] {
   const seen = new Set<string>()
   return units.filter((u) => {
@@ -41,8 +40,6 @@ describe.skipIf(!KEY)('extraction sampling judged by claude-sonnet-5', () => {
         'utf8',
       ),
     )
-    // Both captured payload shapes are judged: the REST feed and the
-    // embedded floor-plans JSON (same extraction as entrataAdapter.fetch).
     const embeddedHtml = readFileSync(
       fileURLToPath(new URL('../../scrapers/fixtures/entrata-embedded.html', import.meta.url)),
       'utf8',
@@ -52,7 +49,6 @@ describe.skipIf(!KEY)('extraction sampling judged by claude-sonnet-5', () => {
     const embeddedPayload = JSON.parse(embeddedMatch[1]!)
     const restUnits = uniqueByTexts(parseEntrataPayload(restPayload).filter(hasTexts)).slice(0, 8)
     const embeddedUnits = uniqueByTexts(parseEntrataPayload(embeddedPayload).filter(hasTexts)).slice(0, 8)
-    // Sample floor per shape; raise the caps as the corpus grows.
     expect(restUnits.length).toBeGreaterThanOrEqual(3)
     expect(embeddedUnits.length).toBeGreaterThanOrEqual(1)
     const units = [...restUnits, ...embeddedUnits]
@@ -67,14 +63,10 @@ describe.skipIf(!KEY)('extraction sampling judged by claude-sonnet-5', () => {
       try {
         enrichment = await enrich(texts)
       } catch (err) {
-        // Mirrors production: a schema-rejected extraction (e.g. Haiku emits
-        // leaseMonths=0 for text that states no lease length) is a counted,
-        // visible per-unit failure in extractSnapshot — never a crash. Only
-        // an all-units wipeout fails the eval below.
         enrichFailures.push(`${u.externalId}: ${String((err as Error).message).split('\n')[0]}`)
         continue
       }
-      if (!enrichment) continue // model found nothing to extract — nothing to judge
+      if (!enrichment) continue
       judged++
       const res = await judgeClient.messages.parse({
         model: 'claude-sonnet-5',
@@ -95,8 +87,8 @@ describe.skipIf(!KEY)('extraction sampling judged by claude-sonnet-5', () => {
     }
     if (enrichFailures.length > 0) console.log(`enrich failures (counted, not judged):\n${enrichFailures.join('\n')}`)
     console.log(contradictions.join('\n') || 'no contradictions')
-    expect(judged).toBeGreaterThanOrEqual(1) // the judge must actually judge something
-    expect(enrichFailures.length).toBeLessThan(units.length) // a full wipeout is a real regression
+    expect(judged).toBeGreaterThanOrEqual(1)
+    expect(enrichFailures.length).toBeLessThan(units.length)
     expect(contradictions).toEqual([])
   })
 })

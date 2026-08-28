@@ -2,7 +2,6 @@ import { test as base } from "@playwright/test";
 import { SearchPage } from "./pages/search-page";
 import { ListingPage } from "./pages/listing-page";
 
-/** Specs import { test, expect } from "./fixtures" to get page objects. */
 export const test = base.extend<{
   searchPage: SearchPage;
   listingPage: ListingPage;
