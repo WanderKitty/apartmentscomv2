@@ -3,6 +3,44 @@ import type { ParsedQuery } from '@aptv2/schema'
 export type Golden = { q: string; expect: Partial<Pick<ParsedQuery,
   'neighborhoods' | 'priceMax' | 'bedsMin' | 'bedsMax' | 'furnished' | 'shortTerm' | 'amenities'>> }
 
+export const GOLDEN_FIELDS = ['neighborhoods', 'priceMax', 'bedsMin', 'bedsMax', 'furnished', 'shortTerm', 'amenities'] as const
+export type GoldenField = (typeof GOLDEN_FIELDS)[number]
+
+/** Score a parser over the golden set: per-field hit rates + readable misses. */
+export function scoreGoldens(
+  parsed: Array<{ golden: Golden; parsed: ParsedQuery }>,
+): { rates: Record<GoldenField, number>; misses: string[] } {
+  const hits = Object.fromEntries(GOLDEN_FIELDS.map((f) => [f, 0])) as Record<GoldenField, number>
+  const misses: string[] = []
+  for (const { golden: g, parsed: p } of parsed) {
+    const exp: Record<GoldenField, unknown> = {
+      neighborhoods: [...(g.expect.neighborhoods ?? [])].sort(),
+      priceMax: g.expect.priceMax ?? null,
+      bedsMin: g.expect.bedsMin ?? null,
+      bedsMax: g.expect.bedsMax ?? null,
+      furnished: g.expect.furnished ?? null,
+      shortTerm: g.expect.shortTerm ?? null,
+      amenities: [...(g.expect.amenities ?? [])].sort(),
+    }
+    const got: Record<GoldenField, unknown> = {
+      neighborhoods: [...p.neighborhoods].sort(),
+      priceMax: p.priceMax,
+      bedsMin: p.bedsMin,
+      bedsMax: p.bedsMax,
+      furnished: p.furnished,
+      shortTerm: p.shortTerm,
+      amenities: [...p.amenities].sort(),
+    }
+    for (const f of GOLDEN_FIELDS) {
+      if (JSON.stringify(got[f]) === JSON.stringify(exp[f])) hits[f]++
+      else misses.push(`${f} | "${g.q}" | expected ${JSON.stringify(exp[f])} got ${JSON.stringify(got[f])}`)
+    }
+  }
+  const n = parsed.length
+  const rates = Object.fromEntries(GOLDEN_FIELDS.map((f) => [f, hits[f] / n])) as Record<GoldenField, number>
+  return { rates, misses }
+}
+
 export const GOLDENS: Golden[] = [
   { q: 'pet friendly 2br under $2400 near Lake Eola with in-unit laundry', expect: { neighborhoods: ['Lake Eola Heights'], priceMax: 2400, bedsMin: 2, bedsMax: 2, amenities: ['pet friendly', 'in-unit laundry'] } },
   { q: '1 bed downtown under 2k', expect: { neighborhoods: ['Downtown Orlando'], priceMax: 2000, bedsMin: 1, bedsMax: 1 } },

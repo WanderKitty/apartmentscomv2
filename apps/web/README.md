@@ -119,9 +119,16 @@ real renter interactions post-demo.
 ```bash
 pnpm --filter @aptv2/web dev              # dev server
 pnpm --filter @aptv2/web test             # vitest (vitest run)
+pnpm --filter @aptv2/web test:e2e         # Playwright end-to-end suite
 pnpm --filter @aptv2/web build            # production build
 pnpm --filter @aptv2/schema gen:schema-docs  # regenerate packages/schema/docs/schema.md
 ```
+
+The e2e suite (`e2e/`) drives a real `next start` against a dedicated
+`aptv2_e2e` database that it migrates and seeds itself (needs the docker
+Postgres and a one-time `pnpm --filter @aptv2/web exec playwright install
+chromium`). No `ANTHROPIC_API_KEY` is passed to the server, so query parsing
+exercises the keyword fallback rung deterministically.
 
 ## Deployment & teardown
 

@@ -7,6 +7,8 @@ dist/
 *.tsbuildinfo
 .superpowers/
 .playwright-mcp/
+playwright-report/
+test-results/
 .claude/
 demo-page.png
 .vercel
