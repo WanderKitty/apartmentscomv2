@@ -60,7 +60,7 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
         ← Back to search
       </Link>
 
-      {/* Photos are linked from the source site, never rehosted (spec §7). */}
+      {/* Photos are linked from the source site, never rehosted. */}
       {listing.photoUrl ? (
         <div className="relative mt-4 h-64 overflow-hidden rounded-card border border-hairline-soft bg-white md:h-80">
           <img

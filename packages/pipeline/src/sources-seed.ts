@@ -83,13 +83,10 @@ export const SOURCES_SEED: Array<{
       },
     },
     rate_limit_rps: 1,
-    // Different embedded shape than Aperture's: Knightsbridge's
-    // floor-plans page embeds its data as
-    // `<div id="rentpress-app" data-floorplans='[...]'>`, not the
-    // `:floor_plans=` attribute the v2 extractor handles. The rentpress
-    // (shape 4) extractor added in Task 6A covers this shape — see
-    // packages/scrapers/src/entrata.ts's rentpress section and
-    // packages/scrapers/fixtures/README.md for the fixture provenance.
+    // Knightsbridge's floor-plans page embeds its data as
+    // `<div id="rentpress-app" data-floorplans='[...]'>` — the rentpress
+    // extractor's shape (packages/scrapers/src/entrata.ts; fixture
+    // provenance in packages/scrapers/fixtures/README.md).
     enabled: true,
   },
 ]

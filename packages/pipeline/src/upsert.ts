@@ -1,14 +1,14 @@
 import type pg from 'pg'
 import { SOURCE_ID_SEPARATOR, type ProcessedUnitData } from '@aptv2/schema'
 
-// The proto-normalize stage (spec §5.4): schema-validated records →
-// properties/units/listings rows, idempotent on natural keys. Plan 4's
-// pipeline calls this exact function with extracted (non-seed) records.
+// Normalize stage: schema-validated records → properties/units/listings
+// rows, idempotent on natural keys. Both seed and scraped records flow
+// through this same function.
 
 const normalizedAddress = (u: ProcessedUnitData) =>
   `${u.address_line1} ${u.city} ${u.state} ${u.zip}`.toLowerCase().replace(/\s+/g, ' ')
 
-// Trust/completeness (spec §5.5), ported from the demo's in-memory scorer.
+// Trust/completeness score: rewards disclosed, unit-level, detailed data.
 function trustScore(u: ProcessedUnitData): number {
   return (
     (u.advertised_rent_cents !== null ? 0.35 : 0) +
@@ -123,14 +123,12 @@ export async function upsertProcessedUnits(
       ...u.unit_amenities, ...u.community_amenities,
     ].join(' ')
 
-    // Price-history append semantics (spec §5.2 amendment): on the conflict
-    // path, a price change appends exactly one synthesized event/history
-    // entry on top of what's already stored; an unchanged (or either-side
-    // null) price appends nothing and EXCLUDED.events/price_history (this
-    // run's freshly-synthesized first_listed event) is discarded entirely.
-    // The INSERT path is unaffected — it still uses the record's own
-    // events/history verbatim, so seed rows keep authoring full history and
-    // the seed corpus re-run stays idempotent (seed prices never change).
+    // Price-history append semantics: on the conflict path, a price change
+    // appends exactly one synthesized event/history entry on top of what's
+    // stored; an unchanged (or either-side null) price appends nothing and
+    // this run's freshly-synthesized events are discarded. The INSERT path
+    // uses the record's own events/history verbatim, so seed rows keep
+    // authoring full history and re-runs stay idempotent.
     const priceChangedCase = `listings.price_cents IS NOT NULL AND EXCLUDED.price_cents IS NOT NULL AND listings.price_cents <> EXCLUDED.price_cents`
     const nowIso = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
     const appendedEvent = `jsonb_build_object('at', ${nowIso}, 'kind', CASE WHEN EXCLUDED.price_cents < listings.price_cents THEN 'price_drop' ELSE 'price_increase' END, 'from_cents', listings.price_cents, 'to_cents', EXCLUDED.price_cents, 'note', null)`
@@ -158,12 +156,9 @@ export async function upsertProcessedUnits(
          furnished = EXCLUDED.furnished,
          status = EXCLUDED.status,
          last_confirmed_at = EXCLUDED.last_confirmed_at,
-         -- Non-price EXCLUDED events are intentionally dropped today: this
-         -- run's freshly-synthesized events array is discarded wholesale
-         -- unless it reflects a price change (extraction currently only
-         -- ever emits a single 'first_listed' event per run). If extraction
-         -- starts emitting other event kinds (e.g. availability changes),
-         -- those must be merged in here too, not just the price delta.
+         -- Non-price EXCLUDED events are intentionally dropped (extraction
+         -- only emits 'first_listed' per run). If extraction starts
+         -- emitting other event kinds, they must be merged in here too.
          events = CASE WHEN ${priceChangedCase} THEN listings.events || jsonb_build_array(${appendedEvent}) ELSE listings.events END,
          price_history = ${newPriceHistoryExpr},
          price_changes = jsonb_array_length(${newPriceHistoryExpr}),

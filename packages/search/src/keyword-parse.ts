@@ -4,7 +4,7 @@ const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** Whole-word/phrase match for a literal term (city name, amenity keyword). */
 const wordRegex = (term: string) => new RegExp(`\\b${escapeRegex(term.toLowerCase())}\\b`);
 
-/** Deterministic keyword rung of the fail-open ladder (spec §6.1). */
+/** Deterministic keyword rung of the fail-open ladder. */
 export function parseQueryKeywords(raw: string): ParsedQuery {
   const q = raw.toLowerCase();
 
@@ -103,7 +103,7 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
     shortTerm,
     amenities,
     sort,
-    // Fail-open ladder (§6.1): nothing recognized → raw text runs as FTS.
+    // Fail-open ladder: nothing recognized → raw text runs as FTS.
     residualText: recognizedAnything ? "" : raw.trim(),
     failedOpen: !recognizedAnything && raw.trim().length > 0,
     parseSource: "fallback" as const,

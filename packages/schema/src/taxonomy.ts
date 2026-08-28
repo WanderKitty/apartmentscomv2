@@ -1,5 +1,5 @@
 // The neighborhood and amenity taxonomy. Feeds the LLM parser's closed
-// enums (spec §6.1) and the keyword-fallback matcher.
+// enums and the keyword-fallback matcher.
 
 export const NEIGHBORHOOD_ALIASES: Record<string, string[]> = {
   "Lake Eola Heights": ["lake eola heights", "lake eola", "eola"],
@@ -13,9 +13,8 @@ export const NEIGHBORHOOD_ALIASES: Record<string, string[]> = {
   "Lake Nona": ["lake nona"],
 };
 
-/** Closed enum of Florida cities the city filter can match (spec-adjacent
- * discovery constraint: new sources may only register in these cities, or
- * add to this list in the same commit). */
+/** Closed enum of Florida cities the city filter can match. New sources may
+ * only register in these cities, or add to this list in the same commit. */
 export const FLORIDA_CITIES = [
   "Orlando", "Tampa", "Miami", "Jacksonville", "St. Petersburg",
   "Fort Lauderdale", "Kissimmee", "Winter Park", "Gainesville", "Tallahassee",

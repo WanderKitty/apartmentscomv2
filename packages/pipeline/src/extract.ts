@@ -12,7 +12,7 @@ import {
 } from '@aptv2/schema'
 import { parseEntrataPayload, parseSpherexxPayload, sha256Json, type SourceRow } from '@aptv2/scrapers'
 
-// Stage 3 (spec §5.3): deterministic mapping first — no LLM for price /
+// Extract stage: deterministic mapping first — no LLM for price /
 // beds / baths / sqft / availability — then one enrichment call per
 // CHANGED unit for genuinely unstructured text, cached by content hash.
 // Fail-open: no key / any error → enriched fields stay not_mentioned.
@@ -74,10 +74,9 @@ export async function extractSnapshot(
   // Best-effort hash list for the batch prefetch ONLY — keyed on the
   // enrichment INPUTS only (not the whole raw unit) so a rent/availability
   // change doesn't bust an LLM result that's still valid. A unit whose hash
-  // can't be computed here is simply left out of the prefetch: the per-unit
-  // try below recomputes it and is where such a failure is actually caught
-  // and counted, so a single malformed unit can never crash the whole
-  // snapshot (review Important 5).
+  // can't be computed here is left out of the prefetch: the per-unit try
+  // below recomputes it and is where such a failure is caught and counted,
+  // so one malformed unit can never crash the whole snapshot.
   const prefetchHashes: string[] = []
   for (const ru of parsed) {
     try {
@@ -86,10 +85,8 @@ export async function extractSnapshot(
       // swallowed here — the per-unit try below will hit (and count) this same failure
     }
   }
-  // Scale fix: one batched lookup for the whole snapshot instead of a
-  // per-unit round trip — a large snapshot could otherwise issue hundreds
-  // of individual cache SELECTs. Feeds enrichmentFor (the concurrency
-  // wrapper) so both lineages' wins survive this merge.
+  // One batched lookup for the whole snapshot — a large snapshot would
+  // otherwise issue hundreds of individual cache SELECTs.
   prefetched = await fetchCachedEnrichments(pool, prefetchHashes)
 
   const buildUnit = async (i: number) => {
@@ -99,11 +96,10 @@ export async function extractSnapshot(
       const texts = [...ru.amenityTexts, ...ru.marketingTexts]
       const unitHash = sha256Json({ texts, v: 2 })
       const enrichment = await enrichmentFor(unitHash, texts)
-      // Guard (prod incident 2026-08-28): a concession without a positive
-      // lease term cannot be amortized — netEffectiveMonthlyCents divides by
-      // leaseMonths, so 0 produced Infinity and failed every enriched unit.
-      // The enricher schema now forbids it, but cached rows and any future
-      // model drift must degrade to text-only here, never fail the unit.
+      // A concession without a positive lease term cannot be amortized —
+      // netEffectiveMonthlyCents divides by leaseMonths. The enricher
+      // schema forbids it, but cached rows and any future model drift must
+      // degrade to text-only here, never fail the unit.
       const rawConcession = enrichment?.concession ?? null
       const concession =
         rawConcession && Number.isFinite(rawConcession.leaseMonths) && rawConcession.leaseMonths > 0
@@ -189,13 +185,13 @@ export async function extractSnapshot(
       })
       slots[i] = record
     } catch (e) {
-      failures.push({ externalId: ru.externalId, error: (e as Error).message }) // counted, never silent (spec §5)
+      failures.push({ externalId: ru.externalId, error: (e as Error).message }) // counted, never silent
     }
   }
 
-  // Bounded worker pool: uncached units each cost an LLM round trip, and at
-  // Plan 6 scale a new source carries hundreds of them. Output order still
-  // follows the payload (slots by index).
+  // Bounded worker pool: uncached units each cost an LLM round trip, and a
+  // new source carries hundreds of them. Output order still follows the
+  // payload (slots by index).
   let next = 0
   const worker = async () => {
     while (next < parsed.length) {
@@ -248,10 +244,8 @@ async function cachedEnrichment(
   }
 }
 
-// ---------------------------------------------------------------------
 // Haiku enrichment: mirrors packages/search/src/llm-parse.ts's structure
 // (single client.messages.parse call, zodOutputFormat, fail-open).
-// ---------------------------------------------------------------------
 
 // Mirrors ProcessedUnitDataSchema's pets_allowed / furnished enums
 // (those aren't exported as standalone const arrays from @aptv2/schema).
