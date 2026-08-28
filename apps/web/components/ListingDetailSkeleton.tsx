@@ -8,7 +8,26 @@
 export function ListingDetailSkeleton() {
   return (
     <div className="mx-auto w-full max-w-[1080px] px-6 pb-16 pt-6" aria-hidden>
-      <div className="h-5 w-28 rounded-[6px] skeleton" />
+      <div className="progress-track h-1 w-full">
+        <div className="progress-bar" />
+      </div>
+      <p className="mt-3 flex items-center gap-2 text-[14px] font-medium text-ink">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--color-rausch)"
+          strokeWidth="3"
+          strokeLinecap="round"
+          className="spinner"
+          aria-hidden
+        >
+          <path d="M12 2.5 A9.5 9.5 0 1 1 2.5 12" />
+        </svg>
+        Loading listing…
+      </p>
+      <div className="mt-4 h-5 w-28 rounded-[6px] skeleton" />
 
       <div className="mt-4 h-64 rounded-card skeleton md:h-80" />
 

@@ -131,6 +131,29 @@ body {
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
 }
 
+/* Indeterminate rausch progress sweep: loading must survive forced-dark
+   browser tools, which crush gray-on-white shimmer but preserve hue. */
+@keyframes progress-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+.progress-track {
+  overflow: hidden;
+  background: var(--color-rausch-disabled);
+  border-radius: 9999px;
+}
+.progress-bar {
+  width: 33%;
+  height: 100%;
+  background: var(--color-rausch);
+  border-radius: 9999px;
+  animation: progress-sweep 1.1s ease-in-out infinite;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -145,7 +168,12 @@ body {
   .img-enter,
   .skeleton,
   .spinner,
-  .pin-drop {
+  .pin-drop,
+  .progress-bar {
     animation: none;
+  }
+  /* Motion gone, signal stays: the bar fills solid rausch. */
+  .progress-bar {
+    width: 100%;
   }
 }
