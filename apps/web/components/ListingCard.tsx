@@ -13,10 +13,13 @@ export function ListingCard({
   listing,
   now,
   debug = false,
+  enterIndex,
 }: {
   listing: Listing;
   now: Date;
   debug?: boolean;
+  /** Position in a freshly-rendered result list; staggers the entrance. */
+  enterIndex?: number;
 }) {
   const facts = [
     formatBedsBaths(listing.beds, listing.baths),
@@ -27,23 +30,51 @@ export function ListingCard({
   ].filter(Boolean);
 
   return (
-    <li className="list-none">
+    <li
+      className={`list-none${enterIndex !== undefined ? " card-enter" : ""}`}
+      style={
+        enterIndex !== undefined
+          ? ({ "--i": enterIndex } as React.CSSProperties)
+          : undefined
+      }
+    >
       <Link
         href={`/listing/${listing.id}`}
-        className="group flex gap-4 rounded-card p-3 transition-shadow hover:shadow-tier"
+        className="group flex gap-4 rounded-card p-3 transition-shadow duration-[var(--duration-micro)] hover:shadow-tier"
       >
         <div className="relative flex size-28 shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-surface-strong sm:size-32">
           {listing.photoUrl ? (
+            // Floorplan diagrams, not photos: contain (never crop labels)
+            // on white, matching the diagrams' own background.
             <img
               src={listing.photoUrl}
               alt={`${listing.propertyName} floorplan`}
               loading="lazy"
-              className="size-full object-cover"
+              className="img-enter size-full bg-white object-contain p-1.5 transition-transform duration-[var(--duration-micro)] ease-[var(--ease-glide)] group-hover:scale-[1.05]"
             />
           ) : (
-            <span className="px-2 text-center text-[8px] font-bold uppercase tracking-[0.32px] text-muted-soft">
-              Photo at source
-            </span>
+            <div className="flex size-full flex-col items-center justify-center gap-1.5 bg-gradient-to-br from-surface-soft to-surface-strong">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-muted-soft"
+                aria-hidden
+              >
+                <path d="M4 21V8l6-4.5L16 8v13" />
+                <path d="M16 21V11l4 2.5V21" />
+                <path d="M2 21h20" />
+                <path d="M8.5 12h1M8.5 16h1" />
+              </svg>
+              <span className="text-[10px] font-medium text-muted-soft">
+                Photo at source
+              </span>
+            </div>
           )}
         </div>
 

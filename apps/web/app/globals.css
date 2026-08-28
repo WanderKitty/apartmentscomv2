@@ -37,6 +37,12 @@
 
   /* Radius */
   --radius-card: 14px;
+
+  /* Extension: motion. One ease, two durations — micro (hover/fade) and
+     entrance (cards). The reference doc defines no motion system. */
+  --ease-glide: cubic-bezier(0.25, 1, 0.5, 1);
+  --duration-micro: 200ms;
+  --duration-entrance: 350ms;
 }
 
 /* No dark mode: the reference system has none for the public web. */
@@ -44,4 +50,72 @@ body {
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
+}
+
+/* Result-card entrance: fade + small rise, staggered per card via --i.
+   The stagger is capped so deep pages never feel slower than shallow ones. */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.card-enter {
+  animation: card-in var(--duration-entrance) var(--ease-glide) both;
+  animation-delay: min(calc(var(--i, 0) * 35ms), 350ms);
+}
+
+/* Image fade-in: smooths the pop when a lazy photo arrives. */
+@keyframes img-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.img-enter {
+  animation: img-in var(--duration-entrance) var(--ease-glide) both;
+}
+
+/* Skeleton shimmer for streamed-in results. */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(
+    100deg,
+    var(--color-surface-strong) 40%,
+    var(--color-surface-soft) 50%,
+    var(--color-surface-strong) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spinner {
+  animation: spin 0.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-enter,
+  .img-enter,
+  .skeleton,
+  .spinner {
+    animation: none;
+  }
 }
