@@ -29,6 +29,8 @@ export type LlmEnricher = (texts: string[]) => Promise<LlmEnrichment | null>
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 
+const ENRICH_CONCURRENCY = 5
+
 export async function extractSnapshot(
   pool: pg.Pool,
   args: {
@@ -45,17 +47,30 @@ export async function extractSnapshot(
   const parsed = parseEntrataPayload(snapshot.payload, source.endpoint_config.endpoint_url) // shape error here fails the whole snapshot — correct: nothing is trustworthy
   const prop = source.endpoint_config.property
   const nowIso = now.toISOString()
-  const units: ProcessedUnitData[] = []
+  const slots: Array<ProcessedUnitData | null> = new Array(parsed.length).fill(null)
   const failures: Array<{ externalId: string; error: string }> = []
+  // One in-flight enrichment per content hash: units sharing identical texts
+  // (common in the embedded shape) must not fan out duplicate LLM calls when
+  // processed concurrently.
+  const inflightByHash = new Map<string, Promise<LlmEnrichment | null>>()
+  const enrichmentFor = (hash: string, texts: string[]): Promise<LlmEnrichment | null> => {
+    let p = inflightByHash.get(hash)
+    if (!p) {
+      p = cachedEnrichment(pool, hash, args.llm ?? null, texts)
+      inflightByHash.set(hash, p)
+    }
+    return p
+  }
 
-  for (const ru of parsed) {
+  const buildUnit = async (i: number) => {
+    const ru = parsed[i]!
     try {
       const externalId = `${slug(prop.name)}-${slug(ru.externalId)}`
       const texts = [...ru.amenityTexts, ...ru.marketingTexts]
       // Keyed on the enrichment INPUTS only (not the whole raw unit) so a
       // rent/availability change doesn't bust an LLM result that's still valid.
       const unitHash = sha256Json({ texts, v: 2 })
-      const enrichment = await cachedEnrichment(pool, unitHash, args.llm ?? null, texts)
+      const enrichment = await enrichmentFor(unitHash, texts)
       // Guard (prod incident 2026-08-28): a concession without a positive
       // lease term cannot be amortized — netEffectiveMonthlyCents divides by
       // leaseMonths, so 0 produced Infinity and failed every enriched unit.
@@ -144,12 +159,23 @@ export async function extractSnapshot(
           { at: nowIso, kind: 'first_listed', from_cents: null, to_cents: ru.rentCents, note: null },
         ],
       })
-      units.push(record)
+      slots[i] = record
     } catch (e) {
       failures.push({ externalId: ru.externalId, error: (e as Error).message }) // counted, never silent (spec §5)
     }
   }
-  return { units, failures }
+
+  // Bounded worker pool: uncached units each cost an LLM round trip, and at
+  // Plan 6 scale a new source carries hundreds of them. Output order still
+  // follows the payload (slots by index).
+  let next = 0
+  const worker = async () => {
+    while (next < parsed.length) {
+      await buildUnit(next++)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(ENRICH_CONCURRENCY, parsed.length) }, () => worker()))
+  return { units: slots.filter((u): u is ProcessedUnitData => u !== null), failures }
 }
 
 async function cachedEnrichment(
