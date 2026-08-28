@@ -95,6 +95,19 @@ export interface ParsedQuery {
   furnished: boolean | null;
   shortTerm: boolean | null;
   amenities: string[];
+  /**
+   * Ordering intent. Filters constrain WHICH listings match; sort says in
+   * what order they render. "cheapest" is a sort, not a price filter — it
+   * must never surface as priceMax, and it must not fall through to the
+   * residual-text FTS gate either.
+   */
+  sort:
+    | "relevance"
+    | "price_asc"
+    | "price_desc"
+    | "newest"
+    | "sqft_asc"
+    | "sqft_desc";
   residualText: string;
   /** True when the parse fail-open ladder kicked in (raw text as FTS). */
   failedOpen: boolean;

@@ -1,7 +1,7 @@
 import type { ParsedQuery } from '@aptv2/schema'
 
 export type Golden = { q: string; expect: Partial<Pick<ParsedQuery,
-  'neighborhoods' | 'cities' | 'priceMax' | 'bedsMin' | 'bedsMax' | 'furnished' | 'shortTerm' | 'amenities'>> }
+  'neighborhoods' | 'cities' | 'priceMax' | 'bedsMin' | 'bedsMax' | 'furnished' | 'shortTerm' | 'amenities' | 'sort'>> }
 
 export const GOLDENS: Golden[] = [
   { q: 'pet friendly 2br under $2400 near Lake Eola with in-unit laundry', expect: { neighborhoods: ['Lake Eola Heights'], priceMax: 2400, bedsMin: 2, bedsMax: 2, amenities: ['pet friendly', 'in-unit laundry'] } },
@@ -9,7 +9,7 @@ export const GOLDENS: Golden[] = [
   { q: 'studio in thornton park', expect: { neighborhoods: ['Thornton Park'], bedsMin: 0, bedsMax: 0 } },
   { q: 'furnished 1br near lake eola under $2,000', expect: { neighborhoods: ['Lake Eola Heights'], priceMax: 2000, bedsMin: 1, bedsMax: 1, furnished: true } },
   { q: 'two bedroom two bath with a pool in baldwin park', expect: { neighborhoods: ['Baldwin Park'], bedsMin: 2, bedsMax: 2, amenities: ['pool'] } },
-  { q: 'cheap studio mills 50', expect: { neighborhoods: ['Mills 50'], bedsMin: 0, bedsMax: 0 } },
+  { q: 'cheap studio mills 50', expect: { neighborhoods: ['Mills 50'], bedsMin: 0, bedsMax: 0, sort: 'price_asc' } },
   { q: '3 bedroom college park max $2600', expect: { neighborhoods: ['College Park'], priceMax: 2600, bedsMin: 3, bedsMax: 3 } },
   { q: 'apartments in sodo with parking', expect: { neighborhoods: ['SoDo'], amenities: ['parking'] } },
   { q: 'short term furnished place downtown orlando', expect: { neighborhoods: ['Downtown Orlando'], furnished: true, shortTerm: true } },
@@ -59,4 +59,9 @@ export const GOLDENS: Golden[] = [
   { q: '1 bedroom jacksonville under $1500', expect: { cities: ['Jacksonville'], priceMax: 1500, bedsMin: 1, bedsMax: 1 } },
   { q: 'furnished 2 bed tampa with a pool', expect: { cities: ['Tampa'], bedsMin: 2, bedsMax: 2, furnished: true, amenities: ['pool'] } },
   { q: 'pet friendly studio miami under 1400', expect: { cities: ['Miami'], priceMax: 1400, bedsMin: 0, bedsMax: 0, amenities: ['pet friendly'] } },
+  { q: 'cheapest apartments in tampa', expect: { cities: ['Tampa'], sort: 'price_asc' } },
+  { q: 'most expensive 2br miami', expect: { cities: ['Miami'], bedsMin: 2, bedsMax: 2, sort: 'price_desc' } },
+  { q: 'newest listings orlando', expect: { cities: ['Orlando'], sort: 'newest' } },
+  { q: 'smallest studio near lake eola', expect: { neighborhoods: ['Lake Eola Heights'], bedsMin: 0, bedsMax: 0, sort: 'sqft_asc' } },
+  { q: 'biggest 3 bedroom tampa', expect: { cities: ['Tampa'], bedsMin: 3, bedsMax: 3, sort: 'sqft_desc' } },
 ]
