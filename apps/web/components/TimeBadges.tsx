@@ -37,9 +37,11 @@ export function TimeBadges({
   now: Date;
   showNew?: boolean;
 }) {
+  const labels = timeBadgeLabels(events, daysOnMarket, now, { showNew });
+  if (labels.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
-      {timeBadgeLabels(events, daysOnMarket, now, { showNew }).map((label) => (
+      {labels.map((label) => (
         <span
           key={label}
           className={

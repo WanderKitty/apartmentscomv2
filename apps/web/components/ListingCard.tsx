@@ -26,10 +26,8 @@ export function ListingCard({
   const facts = [
     formatBedsBaths(listing.beds, listing.baths),
     formatSqft(listing.sqft),
-    listing.availableDate
-      ? `Avail ${new Date(listing.availableDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
-      : null,
   ].filter(Boolean);
+  const metaLine = `${listing.neighborhood ? `${listing.neighborhood} · ` : ""}${facts.join(" · ")}`;
 
   return (
     <li
@@ -116,10 +114,22 @@ export function ListingCard({
             )}
           </div>
 
-          <p className="truncate text-[14px] leading-[1.43] text-muted">
-            {listing.neighborhood && `${listing.neighborhood} · `}
-            {facts.join(" · ")}
+          {/* title carries the full text past any grid-width truncation. */}
+          <p className="truncate text-[14px] leading-[1.43] text-muted" title={metaLine}>
+            {metaLine}
           </p>
+
+          {/* Availability gets its own row — folded into the truncating
+              line above it was the first thing ellipsized on grid cells. */}
+          {listing.availableDate && (
+            <p className="text-[13px] leading-[1.23] text-muted">
+              Available{" "}
+              {new Date(listing.availableDate + "T00:00:00").toLocaleDateString(
+                "en-US",
+                { month: "short", day: "numeric" },
+              )}
+            </p>
+          )}
 
           {listing.priceIsStartingAt && (
             <p className="text-[13px] leading-[1.23] text-muted">
