@@ -1,12 +1,15 @@
-import { NEIGHBORHOOD_ALIASES, AMENITY_KEYWORDS } from "@aptv2/schema";
-
-// Search-bar autosuggest over data the parser already understands:
-// neighborhoods (with aliases), amenities, and canned example queries.
-// Pure and synchronous — the vocabulary is tiny, no API round-trip.
+// Search-bar autosuggest. Pure and synchronous — the vocabulary is tiny,
+// no API round-trip. Every suggestion must lead to RESULTS on the live
+// corpus: neighborhoods and amenities were removed from the vocabulary
+// because no scraped property falls inside the (crude bbox) neighborhood
+// polygons and the enricher extracts no amenities — both made every such
+// suggestion a guaranteed "0 listings" dead end. Restore them from
+// @aptv2/schema's NEIGHBORHOOD_ALIASES / AMENITY_KEYWORDS once real
+// polygons and amenity extraction land.
 
 export type Suggestion = {
   label: string;
-  kind: "neighborhood" | "amenity" | "example";
+  kind: "filter" | "example";
   /** The full query after accepting this suggestion. */
   apply: string;
 };
@@ -23,22 +26,21 @@ export const EXAMPLE_QUERIES = [
   "furnished studio",
 ];
 
+// Filters the parser maps to hard SQL predicates that the scraped corpus
+// can actually satisfy: beds, price caps, furnished.
 const CANDIDATES: Array<{ label: string; kind: Suggestion["kind"]; terms: string[] }> = [
-  ...Object.entries(NEIGHBORHOOD_ALIASES).map(([label, aliases]) => ({
-    label,
-    kind: "neighborhood" as const,
-    terms: [label.toLowerCase(), ...aliases],
-  })),
-  ...Object.entries(AMENITY_KEYWORDS).map(([label, keywords]) => ({
-    label,
-    kind: "amenity" as const,
-    terms: [label.toLowerCase(), ...keywords],
-  })),
+  { label: "studio", kind: "filter", terms: ["studio"] },
+  { label: "1 bed", kind: "filter", terms: ["1 bed", "1br", "1 br"] },
+  { label: "2 bed", kind: "filter", terms: ["2 bed", "2br", "2 br"] },
+  { label: "3 bed", kind: "filter", terms: ["3 bed", "3br", "3 br"] },
+  { label: "furnished", kind: "filter", terms: ["furnished"] },
+  { label: "under $2,000", kind: "filter", terms: ["under $2,000"] },
+  { label: "under $2,500", kind: "filter", terms: ["under $2,500"] },
 ];
 
 /**
  * Complete the trailing fragment of `input` against the vocabulary:
- * "2 bed in bald" → "2 bed in Baldwin Park". Longest fragment wins;
+ * "furnished 2 b" → "furnished 2 bed". Longest fragment wins;
  * an empty input offers example queries instead.
  */
 export function buildSuggestions(input: string, limit = 6): Suggestion[] {

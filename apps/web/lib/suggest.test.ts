@@ -8,38 +8,24 @@ describe("buildSuggestions", () => {
     expect(s.every((x) => x.kind === "example")).toBe(true);
   });
 
-  it("completes a neighborhood from a prefix", () => {
-    const s = buildSuggestions("bald");
-    expect(s[0]).toMatchObject({
-      label: "Baldwin Park",
-      kind: "neighborhood",
-      apply: "Baldwin Park",
-    });
+  it("completes a bed-count filter from a prefix", () => {
+    const s = buildSuggestions("2 b");
+    expect(s[0]).toMatchObject({ label: "2 bed", kind: "filter", apply: "2 bed" });
   });
 
   it("completes only the trailing fragment, keeping the typed query", () => {
-    const s = buildSuggestions("2 bed in bald");
-    expect(s[0]!.apply).toBe("2 bed in Baldwin Park");
+    const s = buildSuggestions("furnished 2 b");
+    expect(s[0]!.apply).toBe("furnished 2 bed");
   });
 
-  it("resolves aliases to the canonical neighborhood", () => {
-    const s = buildSuggestions("near eola");
-    const eola = s.find((x) => x.label === "Lake Eola Heights")!;
-    expect(eola.apply).toBe("near Lake Eola Heights");
+  it("completes a price cap", () => {
+    const s = buildSuggestions("2 bed under $2");
+    expect(s.some((x) => x.apply === "2 bed under $2,000")).toBe(true);
   });
 
-  it("suggests amenities", () => {
-    const s = buildSuggestions("1br with poo");
-    expect(s[0]).toMatchObject({ label: "pool", kind: "amenity" });
-    expect(s[0]!.apply).toBe("1br with pool");
-  });
-
-  it("does not complete bare connective words like 'in'", () => {
-    // "2 bed in" must not offer "2 bed in-unit laundry".
-    const s = buildSuggestions("2 bed in");
-    expect(s.find((x) => x.label === "in-unit laundry")).toBeUndefined();
-    // …but an explicit fragment still matches.
-    expect(buildSuggestions("2 bed in-u")[0]!.label).toBe("in-unit laundry");
+  it("no longer offers neighborhoods or amenities (dead ends on the scraped corpus)", () => {
+    expect(buildSuggestions("bald")).toEqual([]);
+    expect(buildSuggestions("1br with poo")).toEqual([]);
   });
 
   it("returns nothing for an unmatched fragment", () => {
@@ -47,8 +33,8 @@ describe("buildSuggestions", () => {
   });
 
   it("never suggests what is already fully typed", () => {
-    const s = buildSuggestions("Baldwin Park");
-    expect(s.find((x) => x.apply === "Baldwin Park")).toBeUndefined();
+    const s = buildSuggestions("furnished");
+    expect(s.find((x) => x.apply === "furnished")).toBeUndefined();
   });
 
   it("caps the list", () => {

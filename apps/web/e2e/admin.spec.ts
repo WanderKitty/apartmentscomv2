@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-test("scrape health dashboard renders", async ({ page }) => {
-  await page.goto("/admin");
-  await expect(page.getByRole("heading", { name: "Scrape health" })).toBeVisible();
-  await expect(page.getByText(/0 sources · \d+ active listings/)).toBeVisible();
-  await expect(page.getByRole("columnheader", { name: "Source" })).toBeVisible();
+// The admin dashboard was removed from the public app (user ruling
+// 2026-08-28): the route must 404, while the health endpoint stays for
+// deploy checks and the e2e web server's readiness probe.
+test("admin route is gone", async ({ request }) => {
+  const res = await request.get("/admin");
+  expect(res.status()).toBe(404);
 });
 
 test("health endpoint reports database up", async ({ request }) => {
