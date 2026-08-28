@@ -61,4 +61,36 @@ describe('createNominatimGeocoder', () => {
     const empty = createNominatimGeocoder(pool, { fetchImpl: fakeFetch([]), sleep: vi.fn(async () => {}) })
     expect(await empty('nowhere query')).toBeNull()
   })
+
+  it('caches a genuine miss (empty Nominatim result) as a NULL-coordinate row, so a repeated identical query never re-hits Nominatim', async () => {
+    const fetchImpl = fakeFetch([])
+    const geocode = createNominatimGeocoder(pool, { fetchImpl, sleep: vi.fn(async () => {}) })
+
+    const first = await geocode('nowhere-in-particular query')
+    expect(first).toBeNull()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+
+    const { rows } = await pool.query(`SELECT latitude, longitude FROM geocode_cache WHERE query = $1`, [
+      'nowhere-in-particular query',
+    ])
+    expect(rows).toEqual([{ latitude: null, longitude: null }])
+
+    const second = await geocode('nowhere-in-particular query')
+    expect(second).toBeNull()
+    expect(fetchImpl).toHaveBeenCalledTimes(1) // cached miss — no second network call
+  })
+
+  it('does NOT cache a transient failure (network throw), so a future call gets a fresh chance', async () => {
+    let calls = 0
+    const fetchImpl = vi.fn(async () => {
+      calls++
+      if (calls === 1) throw new Error('transient network error')
+      return { ok: true, status: 200, json: async () => [{ lat: '10', lon: '20' }] } as unknown as Response
+    })
+    const geocode = createNominatimGeocoder(pool, { fetchImpl, sleep: vi.fn(async () => {}) })
+
+    expect(await geocode('transient-failure-query')).toBeNull()
+    expect(await geocode('transient-failure-query')).toEqual({ latitude: 10, longitude: 20 })
+    expect(fetchImpl).toHaveBeenCalledTimes(2) // NOT cached as a miss — retried
+  })
 })

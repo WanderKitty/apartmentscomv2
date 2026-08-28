@@ -53,12 +53,19 @@ export function createPoliteFetcher(
     now?: () => number
     sleep?: (ms: number) => Promise<void>
     maxRps?: number
+    /** Default true (preserves prior behavior): a 429 is retried like a 5xx.
+     * Discovery's verifier passes false — retrying a rate-limited candidate
+     * site during a first-contact probe is impolite regardless of backoff;
+     * a 429 should fail the probe immediately (terminal), not be hammered 3
+     * times. 5xx retry behavior is unaffected either way. */
+    retry429?: boolean
   } = {},
 ): PoliteFetcher {
   const fetchImpl = opts.fetchImpl ?? fetch
   const now = opts.now ?? Date.now
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   const minGapMs = 1000 / (opts.maxRps ?? 1)
+  const retry429 = opts.retry429 ?? true
   const lastRequestAt = new Map<string, number>()
 
   // ONE politeness path for every request kind: robots gate, per-domain
@@ -85,6 +92,7 @@ export function createPoliteFetcher(
       lastRequestAt.set(u.hostname, now())
       const res = await fetchImpl(url, { headers: { 'user-agent': USER_AGENT } })
       lastStatus = res.status
+      if (res.status === 429 && !retry429) throw new Error(`rate limited (429), not retrying: ${url}`)
       if (res.status >= 500 || res.status === 429) continue
       return res
     }

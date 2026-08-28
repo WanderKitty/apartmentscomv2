@@ -47,7 +47,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <p>
               Listings come straight from property websites. Photos and
               descriptions stay at the source — we link, never copy.
-              Geocoding data © OpenStreetMap contributors.
+              Geocoding data ©{" "}
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                className="underline hover:text-ink"
+              >
+                OpenStreetMap contributors
+              </a>
+              .
             </p>
           </div>
         </footer>

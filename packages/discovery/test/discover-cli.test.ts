@@ -2,10 +2,13 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { Pool } from 'pg'
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { resetTestDb } from '@aptv2/db/test-helpers'
 import { RobotsDisallowedError, type PoliteFetcher } from '@aptv2/scrapers'
 import { runDiscoverCli } from '../src/discover-cli'
+
+const PACKAGE_DIR = fileURLToPath(new URL('..', import.meta.url))
 
 let pool: Pool
 let dir: string
@@ -44,9 +47,30 @@ function fakeFetcher(responses: Record<string, Canned>): PoliteFetcher {
   }
 }
 
-const ORLANDO_LD_JSON = `<script type="application/ld+json">{"@context":"https://schema.org","@type":"ApartmentComplex","name":"CLI Test Community","address":{"@type":"PostalAddress","streetAddress":"1 Test Blvd","addressLocality":"Orlando","addressRegion":"FL","postalCode":"32801"},"geo":{"@type":"GeoCoordinates","latitude":"28.5","longitude":"-81.4"}}</script>`
-function embeddedV1Html() {
-  return `<html><head></head><body>${ORLANDO_LD_JSON}<script type="application/json" id="jd-fp-data-script-app">{"units":[{"id_value":1,"bedrooms":"1","bathrooms":"1"}]}</script></body></html>`
+/** Wraps a fetcher to count every fetchText/fetchJson call made through it. */
+function countingFetcher(inner: PoliteFetcher): { fetcher: PoliteFetcher; count: () => number } {
+  let n = 0
+  return {
+    fetcher: {
+      fetchText: (...args) => {
+        n++
+        return inner.fetchText(...args)
+      },
+      fetchJson: (...args) => {
+        n++
+        return inner.fetchJson(...args)
+      },
+    },
+    count: () => n,
+  }
+}
+
+function orlandoLdJson(name: string) {
+  return `<script type="application/ld+json">{"@context":"https://schema.org","@type":"ApartmentComplex","name":"${name}","address":{"@type":"PostalAddress","streetAddress":"1 Test Blvd","addressLocality":"Orlando","addressRegion":"FL","postalCode":"32801"},"geo":{"@type":"GeoCoordinates","latitude":"28.5","longitude":"-81.4"}}</script>`
+}
+const ORLANDO_LD_JSON = orlandoLdJson('CLI Test Community')
+function embeddedV1Html(ldJson: string = ORLANDO_LD_JSON) {
+  return `<html><head></head><body>${ldJson}<script type="application/json" id="jd-fp-data-script-app">{"units":[{"id_value":1,"bedrooms":"1","bathrooms":"1"}]}</script></body></html>`
 }
 const PERMISSIVE_ROBOTS = { status: 200, text: 'User-agent: *\nDisallow:\n' }
 const NO_ROBOTS_FILE = { status: 404, text: '' }
@@ -103,5 +127,45 @@ describe('runDiscoverCli', () => {
 
     const { rows } = await pool.query(`SELECT * FROM sources WHERE website_url = $1`, ['https://cli-idem.example.com/'])
     expect(rows).toHaveLength(1)
+  })
+
+  it('review minor: the default report path is pinned to the package directory, not process.cwd()', async () => {
+    const candidatesPath = path.join(dir, 'candidates.json')
+    await writeFile(candidatesPath, JSON.stringify([]))
+    const out = await runDiscoverCli(candidatesPath, { pool, fetcher: fakeFetcher({}) })
+    try {
+      expect(out.reportPath.startsWith(PACKAGE_DIR)).toBe(true)
+      const written = JSON.parse(await readFile(out.reportPath, 'utf8'))
+      expect(written.results).toEqual([])
+    } finally {
+      await rm(out.reportPath, { force: true })
+    }
+  })
+
+  it('review C1: 35 candidates on the SAME host (a willowbridgepc.com-style shared-domain portfolio) cost exactly ONE robots.txt fetch total', async () => {
+    const HOST = 'https://willowbridge-test.example.com'
+    const candidates = Array.from({ length: 35 }, (_, i) => ({
+      url: `${HOST}/properties/community-${i}`,
+      metro: 'Orlando',
+    }))
+    const candidatesPath = path.join(dir, 'candidates.json')
+    await writeFile(candidatesPath, JSON.stringify(candidates))
+
+    const responses: Record<string, { status: number; text: string }> = {
+      [`${HOST}/robots.txt`]: { status: 200, text: 'User-agent: *\nDisallow:\n' },
+    }
+    for (const c of candidates) {
+      responses[c.url] = { status: 200, text: embeddedV1Html(orlandoLdJson(c.url)) }
+    }
+    const { fetcher, count } = countingFetcher(fakeFetcher(responses))
+    const reportPath = path.join(dir, 'report-shared-host.json')
+    const out = await runDiscoverCli(candidatesPath, { pool, fetcher, reportPath })
+
+    expect(out.tally.registered).toBe(35)
+    // 1 robots.txt fetch + 35 homepage fetches (each homepage fully
+    // resolves via its own embedded-v1 fingerprint — no floor-plans probe,
+    // no separate endpoint request) = 36 total, not 35 * (1 robots + 1
+    // homepage) = 70.
+    expect(count()).toBe(36)
   })
 })
