@@ -29,6 +29,10 @@ jobs:
   # landed without them. Idempotent via extract_cache; auditable per-source
   # scrape_runs rows. Run after wiring new sources or schema deepening.
   reprocess:
+    # After scrape: a first-ever scrape racing a parallel reprocess leaves
+    # just-materialized listings un-enriched until the next cycle (reprocess
+    # loads its snapshot worklist at start).
+    needs: scrape
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
