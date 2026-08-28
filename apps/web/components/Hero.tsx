@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { ChipLink } from "@/components/ChipLink";
 import { SearchBar } from "@/components/SearchBar";
 import { ScrollTour } from "@/components/ScrollTour";
 import { EXAMPLE_QUERIES } from "@/lib/suggest";
@@ -30,13 +30,9 @@ export function Hero() {
 
         <div className="mt-4 flex flex-wrap justify-center gap-2">
           {EXAMPLE_QUERIES.map((ex) => (
-            <Link
-              key={ex}
-              href={`/?q=${encodeURIComponent(ex)}`}
-              className="rounded-full border border-hairline px-3 py-1.5 text-[13px] text-body transition-colors hover:border-border-strong"
-            >
+            <ChipLink key={ex} href={`/?q=${encodeURIComponent(ex)}`}>
               {ex}
-            </Link>
+            </ChipLink>
           ))}
         </div>
       </div>

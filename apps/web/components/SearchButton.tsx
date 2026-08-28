@@ -1,9 +1,7 @@
 "use client";
-import { useFormStatus } from "react-dom";
 
 /** The 48px search orb; swaps to a spinner the instant a search is pending. */
-export function SearchButton() {
-  const { pending } = useFormStatus();
+export function SearchButton({ pending = false }: { pending?: boolean }) {
   return (
     <button
       type="submit"
