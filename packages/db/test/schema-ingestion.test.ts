@@ -59,7 +59,7 @@ describe('migration 0006 ingestion fields', () => {
   })
 })
 
-describe('migration 0007 partial processing status', () => {
+describe('migration 0008 partial processing status', () => {
   it('accepts processing_status = partial and rejects an unrecognized value', async () => {
     const { rows } = await pool.query(
       `INSERT INTO raw_snapshots (source_id, content_hash, payload, processing_status)
