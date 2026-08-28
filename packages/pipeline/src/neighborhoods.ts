@@ -1,36 +1,53 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import type pg from 'pg'
-import { GEO, NEIGHBORHOOD_ALIASES } from '@aptv2/schema'
+import { NEIGHBORHOOD_ALIASES } from '@aptv2/schema'
 
-// Seed-approximate neighborhood boundaries: a bbox around each demo
-// centroid, half-width 0.005° (~550m). Adjacent boxes DO overlap
-// (Lake Eola / Downtown / Thornton centroids are ~0.006–0.007° apart,
-// less than the 0.010° two boxes need to stay disjoint), and boxes are
-// NOT guaranteed to contain only their own hood's listings — two known
-// seed listings sit in a neighboring hood's box as well as their own:
-// Ridgewood House (28.545, -81.376, labeled Lake Eola Heights) also
-// falls inside the Downtown Orlando box, and Eola Commons (28.5462,
-// -81.3708, labeled Lake Eola Heights) also falls inside the Thornton
-// Park box. This is acceptable for the placeholder geo because the
-// search filters are EXISTS-any (a listing matching ANY requested
-// neighborhood box passes) and MIN-distance (proximity scoring), not an
-// exclusive assignment — a listing counted under an extra box never
-// produces a wrong exclusive answer. Replaced by real polygons (Orlando
-// open data / OSM) post-demo.
-const HALF = 0.005
+// Real neighborhood boundaries (neighborhood-boundaries.json): OSM
+// polygons fetched via Nominatim 2026-08-28 (© OpenStreetMap
+// contributors, ODbL) — "Downtown Orlando" is OSM's Central Business
+// District, "Lake Nona" is Lake Nona South. Mills 50 has no OSM polygon
+// and carries a generous hand-drawn box around Mills Ave × Colonial Dr.
+// These replaced the Plan-1 bbox placeholders, which contained NO real
+// scraped property (even 410 N Orange Ave missed "downtown") and made
+// every location-filtered search return zero on the live corpus.
+const boundariesFile = fileURLToPath(new URL('./neighborhood-boundaries.json', import.meta.url))
 
 export async function seedNeighborhoods(pool: pg.Pool): Promise<number> {
+  const boundaries: Record<string, unknown> = JSON.parse(readFileSync(boundariesFile, 'utf8'))
   let n = 0
-  for (const [name, [lat, lng]] of Object.entries(GEO)) {
+  for (const [name, geojson] of Object.entries(boundaries)) {
     const aliases = NEIGHBORHOOD_ALIASES[name] ?? [name.toLowerCase()]
     await pool.query(
       `INSERT INTO neighborhoods (metro, name, aliases, boundary)
        VALUES ('orlando', $1, $2,
-               ST_Multi(ST_MakeEnvelope($3, $4, $5, $6, 4326))::geography)
+               ST_Multi(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($3), 4326)))::geography)
        ON CONFLICT (metro, name) DO UPDATE
          SET aliases = EXCLUDED.aliases, boundary = EXCLUDED.boundary`,
-      [name, aliases, lng - HALF, lat - HALF, lng + HALF, lat + HALF],
+      [name, aliases, JSON.stringify(geojson)],
     )
     n++
   }
   return n
+}
+
+/**
+ * Re-resolve neighborhood assignment for every stored property and
+ * listing against the current boundaries — the backfill that follows a
+ * boundary change. Idempotent.
+ */
+export async function reassignNeighborhoods(pool: pg.Pool): Promise<{ properties: number; listings: number }> {
+  const { rowCount: properties } = await pool.query(
+    `UPDATE properties p SET neighborhood_id = n.id
+     FROM neighborhoods n
+     WHERE ST_Covers(n.boundary, p.location)
+       AND (p.neighborhood_id IS DISTINCT FROM n.id)`,
+  )
+  const { rowCount: listings } = await pool.query(
+    `UPDATE listings l SET neighborhood_id = n.id
+     FROM neighborhoods n
+     WHERE ST_Covers(n.boundary, l.location)
+       AND (l.neighborhood_id IS DISTINCT FROM n.id)`,
+  )
+  return { properties: properties ?? 0, listings: listings ?? 0 }
 }

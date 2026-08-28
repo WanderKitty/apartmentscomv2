@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Pool } from 'pg'
 import { resetTestDb } from '@aptv2/db/test-helpers'
 import { buildSeedUnits } from '@aptv2/schema'
-import { seedNeighborhoods, upsertProcessedUnits, bumpConfirmed, sweepVanished } from '../src/index'
+import { reassignNeighborhoods, seedNeighborhoods, upsertProcessedUnits, bumpConfirmed, sweepVanished } from '../src/index'
 
 const NOW = new Date('2026-08-27T12:00:00.000Z')
 
@@ -22,13 +22,49 @@ afterAll(async () => {
 })
 
 describe('seedNeighborhoods', () => {
-  it('writes one row per centroid-known neighborhood with aliases', async () => {
+  it('writes one row per boundary-known neighborhood with aliases', async () => {
     const { rows } = await pool.query(
       `SELECT name, aliases FROM neighborhoods WHERE metro = 'orlando' ORDER BY name`,
     )
-    expect(rows.length).toBe(8) // the 8 GEO centroids; Lake Nona has no centroid yet
+    expect(rows.length).toBe(9) // real OSM polygons incl. Lake Nona; Mills 50 is a hand box
     const eola = rows.find((r) => r.name === 'Lake Eola Heights')!
     expect(eola.aliases).toContain('lake eola')
+  })
+
+  it('reassignNeighborhoods backfills rows stranded without an assignment', async () => {
+    const stranded = {
+      ...units[0]!,
+      source_id: 'entrata___downtown-backfill-test',
+      collapse_key: 'entrata:downtown-backfill-test',
+      liberal_dedup_cluster: 'orlando:downtown-backfill-test',
+      property_name: 'Downtown Backfill Fixture',
+      address_line1: '410 N Orange Ave',
+      latitude: 28.5484,
+      longitude: -81.3786,
+      neighborhood: '',
+    }
+    await upsertProcessedUnits(pool, [stranded])
+    // Simulate the pre-polygon state: assignment lost.
+    await pool.query(`UPDATE listings SET neighborhood_id = NULL WHERE collapse_key = 'entrata:downtown-backfill-test'`)
+    await reassignNeighborhoods(pool)
+    const { rows } = await pool.query(
+      `SELECT n.name FROM listings l JOIN neighborhoods n ON n.id = l.neighborhood_id
+       WHERE l.collapse_key = 'entrata:downtown-backfill-test'`,
+    )
+    expect(rows[0]?.name).toBe('Downtown Orlando')
+    // The later corpus-count assertions expect exactly the 26 seed rows.
+    await pool.query(`DELETE FROM listings WHERE collapse_key = 'entrata:downtown-backfill-test'`)
+  })
+
+  it('real polygons contain real properties: 410 N Orange Ave resolves to Downtown Orlando', async () => {
+    // Society Orlando's actual location — under the old bbox placeholders
+    // it resolved to NO neighborhood, which zeroed every location search
+    // on the scraped corpus.
+    const { rows } = await pool.query(
+      `SELECT name FROM neighborhoods
+       WHERE ST_Covers(boundary, ST_SetSRID(ST_MakePoint(-81.3786, 28.5484), 4326)::geography)`,
+    )
+    expect(rows.map((r) => r.name)).toContain('Downtown Orlando')
   })
 })
 
