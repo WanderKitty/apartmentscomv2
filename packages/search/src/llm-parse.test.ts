@@ -61,6 +61,32 @@ describe("parseQueryWith", () => {
   });
 });
 
+describe("nothing-recognized queries fail open", () => {
+  const EMPTY_OUT = {
+    neighborhoods: [],
+    price_max_dollars: null,
+    beds_min: null,
+    beds_max: null,
+    furnished: null,
+    short_term: null,
+    amenities: [],
+    residual_text: "",
+  };
+
+  it("a parse that recognized nothing runs the raw text as keywords instead of matching everything", async () => {
+    const p = await parseQueryWith("sadasdasd dsadsadas", fakeClient(EMPTY_OUT) as never);
+    expect(p.parseSource).toBe("llm");
+    expect(p.failedOpen).toBe(true);
+    expect(p.residualText).toBe("sadasdasd dsadsadas");
+  });
+
+  it("a parse with any real filter keeps its empty residual", async () => {
+    const p = await parseQueryWith("2br near lake eola", fakeClient(LLM_OUT) as never);
+    expect(p.failedOpen).toBe(false);
+    expect(p.residualText).toBe("");
+  });
+});
+
 describe("guardrails", () => {
   it("never sends an oversized query to the LLM — straight to the keyword rung", async () => {
     const client = fakeClient(LLM_OUT);
