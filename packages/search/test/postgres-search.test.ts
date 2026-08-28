@@ -223,6 +223,78 @@ describe('postgres SearchService', () => {
 
   // Last: inserts an extra listing, which would otherwise shift the
   // corpus/totalCount assertions the earlier tests depend on.
+  it('surfaces the unit image_url as photoUrl in search and getListing', async () => {
+    const withImage = ProcessedUnitDataSchema.parse({
+      ...minimalUnit(),
+      source_id: `entrata${SOURCE_ID_SEPARATOR}image-test`,
+      platform: 'entrata',
+      collapse_key: 'entrata:image-test',
+      liberal_dedup_cluster: 'orlando:image-test-unit',
+      source_url: 'https://example.com/image-test',
+      data_provenance: 'scraped',
+      property_name: 'Image Fixture',
+      address_line1: '1 Image Way',
+      city: 'Orlando', state: 'FL', zip: '32801',
+      neighborhood: 'Lake Eola Heights',
+      latitude: 28.5461, longitude: -81.3707,
+      beds: 1, baths: 1,
+      advertised_rent_cents: 140000,
+      price_level: 'unit', is_price_transparent: true,
+      image_url: 'https://example.com/floorplans/image-test.jpg',
+      first_seen_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(),
+    })
+    await upsertProcessedUnits(pool, [withImage])
+    const l = await service().getListing('entrata___image-test')
+    expect(l!.photoUrl).toBe('https://example.com/floorplans/image-test.jpg')
+    const r = await service().search('Image Fixture')
+    const card = r.listings.find((x) => x.propertyName === 'Image Fixture')!
+    expect(card.photoUrl).toBe('https://example.com/floorplans/image-test.jpg')
+  })
+
+  it('serves the listing coordinates for the map (search and getListing)', async () => {
+    // Reuses the Image Fixture row upserted above at 28.5461, -81.3707.
+    const l = await service().getListing('entrata___image-test')
+    expect(l!.latitude).toBeCloseTo(28.5461, 4)
+    expect(l!.longitude).toBeCloseTo(-81.3707, 4)
+    const r = await service().search('Image Fixture')
+    const card = r.listings.find((x) => x.propertyName === 'Image Fixture')!
+    expect(card.latitude).toBeCloseTo(28.5461, 4)
+    expect(card.longitude).toBeCloseTo(-81.3707, 4)
+  })
+
+  it('a row without a stored location serves null coordinates, not a crash', async () => {
+    // listings.location is nullable; no writer produces NULL today, so pin
+    // the read path directly.
+    await pool.query(`UPDATE listings SET location = NULL WHERE collapse_key = 'entrata:image-test'`)
+    try {
+      const l = await service().getListing('entrata___image-test')
+      expect(l).not.toBeNull()
+      expect(l!.latitude).toBeNull()
+      expect(l!.longitude).toBeNull()
+    } finally {
+      await pool.query(
+        `UPDATE listings SET location = ST_SetSRID(ST_MakePoint(-81.3707, 28.5461), 4326)::geography
+         WHERE collapse_key = 'entrata:image-test'`,
+      )
+    }
+  })
+
+  it('bath counts and price-sort words in residual text never zero the results', async () => {
+    // The LLM rung leaves unmapped phrases ("3 bath", "cheapest") in
+    // residualText, which becomes a HARD tsquery filter — and neither
+    // phrase appears in any listing text, so they zeroed every match.
+    const stub = async (raw: string) => ({
+      ...parseQueryKeywords(raw),
+      bedsMin: 1,
+      bedsMax: 1,
+      residualText: 'cheapest 3 bath',
+      failedOpen: false,
+    })
+    const svc = createSearchService(() => pool, { parse: stub })
+    const r = await svc.search('cheapest 1 bed 3 bath')
+    expect(r.totalCount).toBeGreaterThan(0) // 1-bed seed listings exist
+  })
+
   it('labels a net-effective discount without a structured concession as "Special rate"', async () => {
     const specialRateUnit = ProcessedUnitDataSchema.parse({
       ...minimalUnit(),

@@ -19,25 +19,55 @@ const Verdict = z.object({
   ),
 })
 
+type TextedUnit = { amenityTexts: string[]; marketingTexts: string[] }
+const hasTexts = (u: TextedUnit) => [...u.amenityTexts, ...u.marketingTexts].some((t) => t.trim())
+
+function uniqueByTexts<T extends TextedUnit>(units: T[]): T[] {
+  const seen = new Set<string>()
+  return units.filter((u) => {
+    const key = [...u.amenityTexts, ...u.marketingTexts].join('\n')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 describe.skipIf(!KEY)('extraction sampling judged by claude-sonnet-5', () => {
   it('no extracted field contradicts its source text', async () => {
-    const payload = JSON.parse(
+    const restPayload = JSON.parse(
       readFileSync(
         fileURLToPath(new URL('../../scrapers/fixtures/entrata-availability.json', import.meta.url)),
         'utf8',
       ),
     )
-    const units = parseEntrataPayload(payload)
-      .filter((u) => [...u.amenityTexts, ...u.marketingTexts].some((t) => t.trim()))
-      .slice(0, 12)
-    expect(units.length).toBeGreaterThanOrEqual(3) // sample floor; raise the cap as the corpus grows
+    const embeddedHtml = readFileSync(
+      fileURLToPath(new URL('../../scrapers/fixtures/entrata-embedded.html', import.meta.url)),
+      'utf8',
+    )
+    const embeddedMatch = embeddedHtml.match(/<script[^>]*id="jd-fp-data-script-app"[^>]*>([\s\S]*?)<\/script>/)
+    if (!embeddedMatch) throw new Error('embedded floor-plan script tag not found in fixture')
+    const embeddedPayload = JSON.parse(embeddedMatch[1]!)
+    const restUnits = uniqueByTexts(parseEntrataPayload(restPayload).filter(hasTexts)).slice(0, 8)
+    const embeddedUnits = uniqueByTexts(parseEntrataPayload(embeddedPayload).filter(hasTexts)).slice(0, 8)
+    expect(restUnits.length).toBeGreaterThanOrEqual(3)
+    expect(embeddedUnits.length).toBeGreaterThanOrEqual(1)
+    const units = [...restUnits, ...embeddedUnits]
     const enrich = createHaikuEnricher()!
     const judgeClient = new Anthropic()
     const contradictions: string[] = []
+    const enrichFailures: string[] = []
+    let judged = 0
     for (const u of units) {
       const texts = [...u.amenityTexts, ...u.marketingTexts]
-      const enrichment = await enrich(texts)
-      if (!enrichment) continue // model found nothing to extract — nothing to judge
+      let enrichment
+      try {
+        enrichment = await enrich(texts)
+      } catch (err) {
+        enrichFailures.push(`${u.externalId}: ${String((err as Error).message).split('\n')[0]}`)
+        continue
+      }
+      if (!enrichment) continue
+      judged++
       const res = await judgeClient.messages.parse({
         model: 'claude-sonnet-5',
         max_tokens: 1024,
@@ -55,7 +85,10 @@ describe.skipIf(!KEY)('extraction sampling judged by claude-sonnet-5', () => {
         if (f.verdict === 'contradicted') contradictions.push(`${u.externalId}.${f.field}: ${f.note}`)
       }
     }
+    if (enrichFailures.length > 0) console.log(`enrich failures (counted, not judged):\n${enrichFailures.join('\n')}`)
     console.log(contradictions.join('\n') || 'no contradictions')
+    expect(judged).toBeGreaterThanOrEqual(1)
+    expect(enrichFailures.length).toBeLessThan(units.length)
     expect(contradictions).toEqual([])
   })
 })

@@ -7,10 +7,11 @@ const KEY = process.env.ANTHROPIC_API_KEY
 describe.skipIf(!KEY)('golden parse regression (live claude-haiku-4-5)', () => {
   it(`meets per-field accuracy thresholds over the ${GOLDENS.length}-query golden set`, async () => {
     __resetParseCacheForTests()
-    const fields = ['neighborhoods', 'cities', 'priceMax', 'bedsMin', 'bedsMax', 'furnished', 'shortTerm', 'amenities'] as const
+    const fields = ['neighborhoods', 'cities', 'priceMax', 'bedsMin', 'bedsMax', 'furnished', 'shortTerm', 'amenities', 'sort'] as const
     const hits: Record<string, number> = Object.fromEntries(fields.map((f) => [f, 0]))
     const misses: string[] = []
     let llmCount = 0
+    const parsed = []
     for (const g of GOLDENS) {
       const p = await parseQuery(g.q)
       if (p.parseSource === 'llm') llmCount++
@@ -23,6 +24,7 @@ describe.skipIf(!KEY)('golden parse regression (live claude-haiku-4-5)', () => {
         furnished: g.expect.furnished ?? null,
         shortTerm: g.expect.shortTerm ?? null,
         amenities: [...(g.expect.amenities ?? [])].sort(),
+        sort: g.expect.sort ?? 'relevance',
       }
       const got: Record<string, unknown> = {
         neighborhoods: [...p.neighborhoods].sort(),
@@ -33,6 +35,7 @@ describe.skipIf(!KEY)('golden parse regression (live claude-haiku-4-5)', () => {
         furnished: p.furnished,
         shortTerm: p.shortTerm,
         amenities: [...p.amenities].sort(),
+        sort: p.sort,
       }
       for (const f of fields) {
         if (JSON.stringify(got[f]) === JSON.stringify(exp[f])) hits[f]!++

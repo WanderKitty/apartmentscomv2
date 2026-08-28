@@ -74,6 +74,13 @@ describe('parseEntrataPayload (golden, REST shape — Current Orlando fixture)',
     expect(studio.detailUrl).toBe('https://example.com/local-floor-plans/the-studio/')
   })
 
+  it('carries the floorplan image (featured_image.url) as imageUrl', () => {
+    const studio = units[0]!
+    expect(studio.imageUrl).toBe(
+      'https://www.currentorlando.com/wp-content/uploads/2025/12/Current-Orlando-Floorplan-Unit-S1.jpg',
+    )
+  })
+
   it('carries free text and a discounted special rate (floorplan ID 2133, "The Two")', () => {
     const theTwo = units[8]!
     expect(theTwo.externalId).toBe('annual-2133')
@@ -128,6 +135,15 @@ describe('parseEntrataPayload (golden, embedded shape — Society Orlando captur
     // in the real capture — must resolve against the base, not pass through raw.
     expect(unit.detailUrl).toBe(
       'https://societyorlando.com/floorplans/unit-4fad4c8f34c45ca364a20e1c2f67ef67/',
+    )
+  })
+
+  it('carries the floorplan layout image (thumbnail.src) as imageUrl', () => {
+    const unit = units.find((u) => u.unitNumber === '1822-B')!
+    // The src contains a literal "|", which WHATWG URL serialization keeps
+    // as-is — and z.string().url() downstream accepts (it just runs new URL).
+    expect(unit.imageUrl).toBe(
+      'https://societyorlando.com/assets/images/rent--by--bedroom|3-bed--d1_single1.svg',
     )
   })
 })

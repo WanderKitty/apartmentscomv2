@@ -10,7 +10,7 @@ import {
   type Concession,
   type ProcessedUnitData,
 } from '@aptv2/schema'
-import { parseEntrataPayload, sha256Json, type SourceRow } from '@aptv2/scrapers'
+import { parseEntrataPayload, parseSpherexxPayload, sha256Json, type SourceRow } from '@aptv2/scrapers'
 
 // Stage 3 (spec §5.3): deterministic mapping first — no LLM for price /
 // beds / baths / sqft / availability — then one enrichment call per
@@ -29,6 +29,8 @@ export type LlmEnricher = (texts: string[]) => Promise<LlmEnrichment | null>
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 
+const ENRICH_CONCURRENCY = 5
+
 export async function extractSnapshot(
   pool: pg.Pool,
   args: {
@@ -39,14 +41,35 @@ export async function extractSnapshot(
   },
 ): Promise<{ units: ProcessedUnitData[]; failures: Array<{ externalId: string; error: string }> }> {
   const { snapshot, source, now } = args
-  // baseUrl absolutizes any site-relative detail-page path the payload
-  // carries (e.g. the embedded shape's permalink) — required so
-  // `source_url` below is always a valid absolute URL for the schema.
-  const parsed = parseEntrataPayload(snapshot.payload, source.endpoint_config.endpoint_url) // shape error here fails the whole snapshot — correct: nothing is trustworthy
+  // Platform dispatch: spherexx sources carry extracted floorplan cards;
+  // everything else is the Entrata shape family. A shape error here fails
+  // the whole snapshot — correct: nothing is trustworthy. The baseUrl
+  // absolutizes any site-relative detail-page path the payload carries
+  // (e.g. the embedded shape's permalink) — required so `source_url` below
+  // is always a valid absolute URL for the schema.
+  const isSpherexx = source.endpoint_config.mode === 'spherexx'
+  const parsed = isSpherexx
+    ? parseSpherexxPayload(snapshot.payload, source.endpoint_config.endpoint_url)
+    : parseEntrataPayload(snapshot.payload, source.endpoint_config.endpoint_url)
   const prop = source.endpoint_config.property
   const nowIso = now.toISOString()
-  const units: ProcessedUnitData[] = []
+  const slots: Array<ProcessedUnitData | null> = new Array(parsed.length).fill(null)
   const failures: Array<{ externalId: string; error: string }> = []
+  // One in-flight enrichment per content hash: units sharing identical texts
+  // (common in the embedded shape) must not fan out duplicate LLM calls when
+  // processed concurrently.
+  const inflightByHash = new Map<string, Promise<LlmEnrichment | null>>()
+  // `prefetched` is assigned below, after the batched cache lookup completes
+  // and before any worker starts calling this closure.
+  let prefetched = new Map<string, LlmEnrichment | null>()
+  const enrichmentFor = (hash: string, texts: string[]): Promise<LlmEnrichment | null> => {
+    let p = inflightByHash.get(hash)
+    if (!p) {
+      p = cachedEnrichment(pool, hash, args.llm ?? null, texts, prefetched)
+      inflightByHash.set(hash, p)
+    }
+    return p
+  }
 
   // Best-effort hash list for the batch prefetch ONLY — keyed on the
   // enrichment INPUTS only (not the whole raw unit) so a rent/availability
@@ -65,15 +88,17 @@ export async function extractSnapshot(
   }
   // Scale fix: one batched lookup for the whole snapshot instead of a
   // per-unit round trip — a large snapshot could otherwise issue hundreds
-  // of individual cache SELECTs.
-  const cached = await fetchCachedEnrichments(pool, prefetchHashes)
+  // of individual cache SELECTs. Feeds enrichmentFor (the concurrency
+  // wrapper) so both lineages' wins survive this merge.
+  prefetched = await fetchCachedEnrichments(pool, prefetchHashes)
 
-  for (const ru of parsed) {
+  const buildUnit = async (i: number) => {
+    const ru = parsed[i]!
     try {
       const externalId = `${slug(prop.name)}-${slug(ru.externalId)}`
       const texts = [...ru.amenityTexts, ...ru.marketingTexts]
       const unitHash = sha256Json({ texts, v: 2 })
-      const enrichment = await cachedEnrichment(pool, unitHash, args.llm ?? null, texts, cached)
+      const enrichment = await enrichmentFor(unitHash, texts)
       // Guard (prod incident 2026-08-28): a concession without a positive
       // lease term cannot be amortized — netEffectiveMonthlyCents divides by
       // leaseMonths, so 0 produced Infinity and failed every enriched unit.
@@ -96,9 +121,9 @@ export async function extractSnapshot(
       const base = minimalUnit()
       const record: ProcessedUnitData = ProcessedUnitDataSchema.parse({
         ...base,
-        source_id: `entrata${SOURCE_ID_SEPARATOR}${externalId}`,
-        platform: 'entrata',
-        collapse_key: `entrata:${externalId}`,
+        source_id: `${source.platform || 'entrata'}${SOURCE_ID_SEPARATOR}${externalId}`,
+        platform: (source.platform || 'entrata') as ProcessedUnitData['platform'],
+        collapse_key: `${source.platform || 'entrata'}:${externalId}`,
         liberal_dedup_cluster: `orlando:${slug(prop.address_line1)}-${slug(ru.unitNumber ?? ru.floorplanName ?? ru.externalId)}`,
         source_url: ru.detailUrl ?? source.website_url,
         data_provenance: 'scraped',
@@ -149,6 +174,10 @@ export async function extractSnapshot(
         furnished: enrichment?.furnished ?? 'not_mentioned',
         short_term_ok: enrichment?.short_term_ok ?? null,
         generated_summary: enrichment?.summary ?? null,
+        // Fail-open: an image is cosmetic — a bad scheme (the schema only
+        // admits http(s) into an <img src> sink) degrades to null, never
+        // fails the unit.
+        image_url: ru.imageUrl && /^https?:/i.test(ru.imageUrl) ? ru.imageUrl : null,
         available_on: ru.availableOn,
         is_available_now: ru.availableOn !== null && ru.availableOn <= nowIso.slice(0, 10),
         first_seen_at: nowIso, // upsert keeps the earlier first_listed_at on conflict
@@ -158,12 +187,23 @@ export async function extractSnapshot(
           { at: nowIso, kind: 'first_listed', from_cents: null, to_cents: ru.rentCents, note: null },
         ],
       })
-      units.push(record)
+      slots[i] = record
     } catch (e) {
       failures.push({ externalId: ru.externalId, error: (e as Error).message }) // counted, never silent (spec §5)
     }
   }
-  return { units, failures }
+
+  // Bounded worker pool: uncached units each cost an LLM round trip, and at
+  // Plan 6 scale a new source carries hundreds of them. Output order still
+  // follows the payload (slots by index).
+  let next = 0
+  const worker = async () => {
+    while (next < parsed.length) {
+      await buildUnit(next++)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(ENRICH_CONCURRENCY, parsed.length) }, () => worker()))
+  return { units: slots.filter((u): u is ProcessedUnitData => u !== null), failures }
 }
 
 /** One batched lookup for every unit hash in the snapshot (write path stays per-unit — see `cachedEnrichment`). */

@@ -1,7 +1,6 @@
-// Domain types for the web module, mirroring the data model in
-// docs/superpowers/specs/2026-08-27-apartment-aggregator-design.md §4.
-// The web module reads listings ONLY through SearchService (§3.1); the
-// Postgres-backed implementation lives in @aptv2/search.
+// Domain types for the web module. The web module reads listings ONLY
+// through SearchService; the Postgres-backed implementation lives in
+// @aptv2/search.
 
 export type ListingStatus = "active" | "stale" | "gone";
 
@@ -43,6 +42,10 @@ export interface Listing {
   /** Display fallback when neighborhood is empty (Plan 6 Task 4). */
   city: string;
   address: string;
+  /** Null when the stored row has no location (listings.location is nullable);
+   * consumers must gate map UI on both being present. */
+  latitude: number | null;
+  longitude: number | null;
   beds: number; // 0 = studio
   baths: number;
   sqft: number | null;

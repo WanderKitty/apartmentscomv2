@@ -2,6 +2,11 @@ name: Scrape
 on:
   schedule: [{ cron: "0 6,14,22 * * *" }]
   workflow_dispatch:
+    inputs:
+      candidates:
+        description: "Candidates JSON path (packages/discovery-relative) for the discovery job"
+        required: false
+        default: "candidates/fl-metros.json"
 
 jobs:
   scrape:
@@ -16,4 +21,42 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @aptv2/db migrate
       - run: pnpm --filter @aptv2/worker scrape:all
+
+  # Enrichment backfill (manual): re-extracts each source's latest snapshot
+  # with the Haiku enricher — fills summaries/concessions for listings that
+  # landed without them. Idempotent via extract_cache; auditable per-source
+  # scrape_runs rows. Run after wiring new sources or schema deepening.
+  reprocess:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @aptv2/worker reprocess
+
+  # Supervised-candidate discovery with the keyed facts rung (LLM fallback
+  # for sites without schema.org facts). Sequential, politeness-gated —
+  # same compliance posture as the local supervised runs, just keyed.
+  discovery:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @aptv2/db migrate
+      - run: pnpm --filter @aptv2/discovery discover "${{ github.event.inputs.candidates || 'candidates/fl-metros.json' }}"

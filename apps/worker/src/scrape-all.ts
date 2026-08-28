@@ -4,13 +4,15 @@ import { getPool } from '@aptv2/db'
 import { createHaikuEnricher } from '@aptv2/pipeline'
 import { createPoliteFetcher } from '@aptv2/scrapers'
 import { runProcess, runScrape } from './jobs/scrape'
+import { runScrapePool } from './scrape-pool'
 
 // The entry point a hosted cron (GitHub Actions, Plan 5) invokes instead of
-// the long-lived pg-boss process: loop every enabled source, scrape then
-// (if changed) process it, sequentially, never letting one source's
-// failure stop the rest — each failure is already recorded in
-// scrape_runs/failure_streak by runScrape/runProcess, so this CLI just
-// logs and moves on.
+// the long-lived pg-boss process: scrape every enabled source, then (if
+// changed) process it, never letting one source's failure stop the rest —
+// each failure is already recorded in scrape_runs/failure_streak by
+// runScrape/runProcess, so this CLI just logs and moves on. Sources run
+// concurrently across hostnames (bounded by runScrapePool); same-host
+// sources stay sequential so the politeness gate is never raced.
 
 config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) })
 
@@ -18,14 +20,12 @@ const pool = getPool()
 const fetcher = createPoliteFetcher()
 const llm = createHaikuEnricher()
 
-const { rows: sources } = await pool.query<{ id: number; name: string }>(
-  `SELECT id, name FROM sources WHERE enabled ORDER BY id`,
+const { rows: sources } = await pool.query<{ id: number; name: string; endpointUrl: string }>(
+  `SELECT id, name, COALESCE(endpoint_config->>'endpoint_url', website_url) AS "endpointUrl"
+   FROM sources WHERE enabled ORDER BY id`,
 )
 
-let succeeded = 0
-let failed = 0
-
-for (const source of sources) {
+const { succeeded, failed } = await runScrapePool(sources, async (source) => {
   try {
     const scrape = await runScrape(pool, { fetcher }, source.id)
     if (scrape.snapshotId !== null) {
@@ -34,12 +34,12 @@ for (const source of sources) {
     } else {
       console.log(`[scrape-all] ${source.name} (#${source.id}): unchanged=${scrape.unchanged}`)
     }
-    succeeded++
+    return true
   } catch (e) {
     console.error(`[scrape-all] ${source.name} (#${source.id}) FAILED:`, (e as Error).message)
-    failed++
+    return false
   }
-}
+})
 
 console.log(`[scrape-all] done: ${succeeded} ok, ${failed} failed, ${sources.length} total`)
 // Tri-state exit for CI cron: Actions treats any nonzero as a red run — for

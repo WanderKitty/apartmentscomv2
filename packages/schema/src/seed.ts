@@ -47,12 +47,15 @@ function seedUnit(n: number, over: Partial<ProcessedUnitData>): ProcessedUnitDat
   return ProcessedUnitDataSchema.parse(withFreqs(merged));
 }
 
-/** Neighborhood centroids (approx) so geo stays plausible. */
+/** Neighborhood centroids so geo stays plausible — each point sits INSIDE
+ * its real OSM polygon (pipeline neighborhood-boundaries.json); the
+ * location filter is spatial, so a centroid outside its own polygon
+ * silently zeroes that neighborhood's searches on the seed corpus. */
 export const GEO: Record<string, [number, number]> = {
-  "Lake Eola Heights": [28.5479, -81.3722], "Thornton Park": [28.5416, -81.3695],
+  "Lake Eola Heights": [28.5479, -81.3722], "Thornton Park": [28.5425, -81.3663],
   "Downtown Orlando": [28.5421, -81.379], "Mills 50": [28.5533, -81.3645],
   "College Park": [28.5702, -81.3937], "Baldwin Park": [28.5691, -81.3287],
-  SoDo: [28.5203, -81.3781], "Audubon Park": [28.5738, -81.3435],
+  SoDo: [28.5049, -81.3742], "Audubon Park": [28.5657, -81.3463],
 };
 
 /** One fictional street per neighborhood, for the V-table's derived addresses. */
@@ -381,6 +384,8 @@ export function toListing(u: ProcessedUnitData, now: Date): Listing {
     neighborhood: u.neighborhood,
     city: u.city,
     address: `${u.address_line1}, ${u.city}, ${u.state} ${u.zip}`,
+    latitude: u.latitude,
+    longitude: u.longitude,
     beds: u.beds, baths: u.baths, sqft: u.sqft,
     price: u.advertised_rent_cents === null ? null : d(u.advertised_rent_cents),
     priceIsStartingAt: u.price_level === "floorplan_starting_at",

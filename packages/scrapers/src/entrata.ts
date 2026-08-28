@@ -23,6 +23,9 @@ export type EntrataUnit = {
   amenityTexts: string[]
   marketingTexts: string[]
   detailUrl: string | null
+  /** Floorplan image when the source carries one: a photo/render (REST shape's
+   * featured_image) or a layout diagram (embedded shape's thumbnail). */
+  imageUrl: string | null
 }
 
 type Obj = Record<string, unknown>
@@ -98,6 +101,9 @@ function mapFloorplanRecord(fp: unknown, path: string, groupSlug: string, baseUr
   // its own path prefix before the attachment-specific slug.
   const detailUrl = isNonEmptyString(fp.slug) ? resolveUrl(`/local-floor-plans/${fp.slug}/`, baseUrl) : null
 
+  const featuredImage = isObj(fp.featured_image) ? fp.featured_image : null
+  const imageUrl = featuredImage && isNonEmptyString(featuredImage.url) ? resolveUrl(featuredImage.url, baseUrl) : null
+
   return {
     externalId: `${groupSlug}-${String(idRaw)}`,
     floorplanName: isNonEmptyString(fp.name) ? fp.name : null,
@@ -111,6 +117,7 @@ function mapFloorplanRecord(fp: unknown, path: string, groupSlug: string, baseUr
     amenityTexts: [], // no amenity-attribute field on this endpoint
     marketingTexts,
     detailUrl,
+    imageUrl,
   }
 }
 
@@ -160,6 +167,9 @@ function mapUnitRecord(u: unknown, path: string, baseUrl: string | undefined): E
   const amenities = Array.isArray(u.amenities) ? (u.amenities as Obj[]) : []
   const marketingTexts = amenities.map((a) => a.name).filter(isNonEmptyString)
 
+  const thumbnail = isObj(u.thumbnail) ? u.thumbnail : null
+  const imageUrl = thumbnail && isNonEmptyString(thumbnail.src) ? resolveUrl(thumbnail.src, baseUrl) : null
+
   return {
     externalId: String(idRaw),
     floorplanName: isNonEmptyString(u.floorplan_title) ? u.floorplan_title : null,
@@ -173,6 +183,7 @@ function mapUnitRecord(u: unknown, path: string, baseUrl: string | undefined): E
     amenityTexts: [], // no separate physical-amenity field distinct from the marketing list below
     marketingTexts,
     detailUrl: resolveUrl(isNonEmptyString(u.permalink) ? u.permalink : null, baseUrl),
+    imageUrl,
   }
 }
 
@@ -220,10 +231,13 @@ function mapV2FloorplanRecord(fp: unknown, path: string, baseUrl: string | undef
   const firstAvail = fp.first_available_date
   const marketingTexts = [fp.current_special_text].filter(isNonEmptyString)
   const link = isNonEmptyString(fp.link_floorplan) ? fp.link_floorplan : isNonEmptyString(fp.link) ? fp.link : null
+  const featuredImage = isObj(fp.featured_image) ? fp.featured_image : null
+  const imageUrl = featuredImage && isNonEmptyString(featuredImage.url) ? resolveUrl(featuredImage.url, baseUrl) : null
 
   return {
     externalId: String(idRaw),
     floorplanName: isNonEmptyString(fp.title) ? fp.title : null,
+    imageUrl,
     unitNumber: null, // per-floorplan granularity, not per physical unit
     beds,
     baths,
@@ -312,6 +326,9 @@ function mapRentpressUnitRecord(u: unknown, fp: Obj, path: string, baseUrl: stri
   return {
     externalId: String(idRaw),
     floorplanName,
+    // No unit-level image field observed in these fixtures; the
+    // floorplan record's featured_image covers the card.
+    imageUrl: null,
     unitNumber: isNonEmptyString(u.unit_name) ? u.unit_name : null,
     beds,
     baths,

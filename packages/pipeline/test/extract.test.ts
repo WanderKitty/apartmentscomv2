@@ -151,6 +151,39 @@ describe('extractSnapshot', () => {
     }
   })
 
+  it('maps the source image into image_url for both payload shapes', async () => {
+    const rest = await extractSnapshot(pool, {
+      snapshot: { id: 60, source_id: SOURCE.id, payload },
+      source: SOURCE, now: NOW, llm: null,
+    })
+    expect(rest.units[0]!.image_url).toBe(
+      'https://www.currentorlando.com/wp-content/uploads/2025/12/Current-Orlando-Floorplan-Unit-S1.jpg',
+    )
+    const embedded = await extractSnapshot(pool, {
+      snapshot: { id: 61, source_id: EMBEDDED_SOURCE.id, payload: embeddedPayload },
+      source: EMBEDDED_SOURCE, now: NOW, llm: null,
+    })
+    expect(embedded.failures).toEqual([]) // the "|" in the svg path must survive z.string().url()
+    const unit = embedded.units.find((u) => u.unit_number === '1822-B')!
+    expect(unit.image_url).toBe(
+      'https://societyorlando.com/assets/images/rent--by--bedroom|3-bed--d1_single1.svg',
+    )
+  })
+
+  it('a non-http(s) image degrades to image_url null — never fails the unit', async () => {
+    // Clone the embedded payload and poison one unit's thumbnail with a
+    // scheme the schema (rightly) refuses for an <img src> sink.
+    const poisoned = structuredClone(embeddedPayload)
+    poisoned.units[0].thumbnail = { src: 'javascript:alert(1)' }
+    const { units, failures } = await extractSnapshot(pool, {
+      snapshot: { id: 62, source_id: EMBEDDED_SOURCE.id, payload: poisoned },
+      source: EMBEDDED_SOURCE, now: NOW, llm: null,
+    })
+    expect(failures).toEqual([])
+    expect(units.length).toBe(137)
+    expect(units[0]!.image_url).toBeNull()
+  })
+
   it('produces 11 schema-valid records from the v2 embedded-shape fixture (Aperture), absolute source_urls', async () => {
     const { units, failures } = await extractSnapshot(pool, {
       snapshot: { id: 60, source_id: APERTURE_SOURCE.id, payload: embeddedV2Payload },
@@ -391,5 +424,48 @@ describe('enrichment guard: zero/absent lease term (prod incident 2026-08-28)', 
     }
     // The concession TEXT still survives as a fact for display.
     expect(units.some((u) => u.concession_text_raw === '1 month free!')).toBe(true)
+  })
+})
+
+describe('enrichment concurrency', () => {
+  it('enriches units with distinct texts concurrently, bounded at 5', async () => {
+    await pool.query('DELETE FROM extract_cache')
+    let inFlight = 0
+    let maxInFlight = 0
+    const enricher = vi.fn(async () => {
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((r) => setTimeout(r, 25))
+      inFlight--
+      return null
+    })
+    const { failures } = await extractSnapshot(pool, {
+      snapshot: { id: 95, source_id: SOURCE.id, payload },
+      source: SOURCE, now: NOW, llm: enricher,
+    })
+    expect(failures).toEqual([])
+    expect(enricher.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(maxInFlight).toBeGreaterThanOrEqual(2)
+    expect(maxInFlight).toBeLessThanOrEqual(5)
+  })
+
+  it('units sharing identical texts still produce one enrichment call each', async () => {
+    await pool.query('DELETE FROM extract_cache')
+    const enricher = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 25))
+      return null
+    })
+    const { failures } = await extractSnapshot(pool, {
+      snapshot: { id: 96, source_id: EMBEDDED_SOURCE.id, payload: embeddedPayload },
+      source: EMBEDDED_SOURCE, now: NOW, llm: enricher,
+    })
+    expect(failures).toEqual([])
+    const uniqueTexts = new Set(
+      parseEntrataPayload(embeddedPayload)
+        .map((u) => [...u.amenityTexts, ...u.marketingTexts])
+        .filter((ts) => ts.some((t) => t.trim()))
+        .map((ts) => JSON.stringify(ts)),
+    )
+    expect(enricher.mock.calls.length).toBe(uniqueTexts.size)
   })
 })

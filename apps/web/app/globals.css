@@ -25,10 +25,11 @@
      success color; everything else stays in-system). */
   --color-success: #008a05;
 
-  /* Type — stack verbatim from the reference doc. */
+  /* Type — stack per the reference doc, with Inter (the doc's named
+     open substitute for Cereal) loaded via next/font. */
   --font-sans:
-    "Airbnb Cereal VF", Circular, -apple-system, system-ui, Roboto,
-    "Helvetica Neue", sans-serif;
+    "Airbnb Cereal VF", Circular, var(--font-inter), -apple-system, system-ui,
+    Roboto, "Helvetica Neue", sans-serif;
 
   /* Elevation — the single shadow tier. */
   --shadow-tier:
@@ -37,11 +38,142 @@
 
   /* Radius */
   --radius-card: 14px;
+
+  /* Extension: motion. One ease, two durations — micro (hover/fade) and
+     entrance (cards). The reference doc defines no motion system. */
+  --ease-glide: cubic-bezier(0.25, 1, 0.5, 1);
+  --duration-micro: 200ms;
+  --duration-entrance: 350ms;
 }
 
-/* No dark mode: the reference system has none for the public web. */
+/* No dark mode: the reference system has none for the public web.
+   color-scheme keeps browser Auto Dark Mode from force-inverting the
+   palette (which made the loading skeletons invisible). */
+:root {
+  color-scheme: only light;
+}
 body {
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
+}
+
+/* Result-card entrance: fade + small rise, staggered per card via --i.
+   The stagger is capped so deep pages never feel slower than shallow ones. */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.card-enter {
+  animation: card-in var(--duration-entrance) var(--ease-glide) both;
+  animation-delay: min(calc(var(--i, 0) * 35ms), 350ms);
+}
+
+/* Image fade-in on DOM insertion (an image that loads later than the
+   animation still pops in — acceptable; a load-gated fade needs JS). */
+@keyframes img-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.img-enter {
+  animation: img-in var(--duration-entrance) var(--ease-glide) both;
+}
+
+/* Skeleton shimmer for streamed-in results. */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.skeleton {
+  /* Base a step darker than surface-strong with a bright sheen: the
+     shimmer must stay legible on washed-out or tinted displays. */
+  background: linear-gradient(
+    100deg,
+    var(--color-hairline-soft) 40%,
+    var(--color-canvas) 50%,
+    var(--color-hairline-soft) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* Map pin: drop in and settle. */
+@keyframes pin-drop {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.pin-drop {
+  animation: pin-drop 450ms var(--ease-glide) both;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+}
+
+/* Indeterminate rausch progress sweep: loading must survive forced-dark
+   browser tools, which crush gray-on-white shimmer but preserve hue. */
+@keyframes progress-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+.progress-track {
+  overflow: hidden;
+  background: var(--color-rausch-disabled);
+  border-radius: 9999px;
+}
+.progress-bar {
+  width: 33%;
+  height: 100%;
+  background: var(--color-rausch);
+  border-radius: 9999px;
+  animation: progress-sweep 1.1s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spinner {
+  animation: spin 0.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-enter,
+  .img-enter,
+  .skeleton,
+  .spinner,
+  .pin-drop,
+  .progress-bar {
+    animation: none;
+  }
+  /* Motion gone, signal stays: the bar fills solid rausch. */
+  .progress-bar {
+    width: 100%;
+  }
 }

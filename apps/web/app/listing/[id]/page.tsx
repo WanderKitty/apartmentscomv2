@@ -1,5 +1,8 @@
+import { cache } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { MiniMap } from "@/components/MiniMap";
 import { FreshnessBadge } from "@/components/FreshnessBadge";
 import { TrueCostCard } from "@/components/TrueCostCard";
 import { TimeBadges } from "@/components/TimeBadges";
@@ -19,9 +22,25 @@ function longDate(iso: string): string {
   });
 }
 
+// Per-request memo so metadata and page share one lookup.
+const getListing = cache((id: string) => searchService.getListing(id));
+
+// Resolving here — before the streaming shell flushes — keeps an unknown
+// id an honest HTTP 404 even though the route now has a loading.tsx
+// (notFound() thrown after the shell commits would surface as a 200).
+// Bonus: real page titles.
+export async function generateMetadata(
+  props: PageProps<"/listing/[id]">,
+): Promise<Metadata> {
+  const { id } = await props.params;
+  const listing = await getListing(id);
+  if (!listing) notFound();
+  return { title: `${listing.propertyName} — Eola` };
+}
+
 export default async function ListingPage(props: PageProps<"/listing/[id]">) {
   const { id } = await props.params;
-  const listing = await searchService.getListing(id);
+  const listing = await getListing(id);
   if (!listing) notFound();
   const now = new Date();
 
@@ -33,7 +52,7 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
   ].filter(Boolean);
 
   return (
-    <div className="mx-auto w-full max-w-[1080px] px-6 pb-16 pt-6">
+    <div className="mx-auto w-full max-w-[1080px] px-6 pb-28 pt-6 md:pb-16">
       <Link
         href="/"
         className="text-[14px] text-muted hover:text-ink hover:underline"
@@ -42,19 +61,38 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
       </Link>
 
       {/* Photos are linked from the source site, never rehosted (spec §7). */}
-      <div className="mt-4 flex h-64 flex-col items-center justify-center gap-2 rounded-card bg-surface-strong md:h-80">
-        <span className="text-[8px] font-bold uppercase tracking-[0.32px] text-muted-soft">
-          Photos stay at the source
-        </span>
-        <a
-          href={listing.sourceUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[14px] font-medium text-ink underline"
-        >
-          View photos on the property site ↗
-        </a>
-      </div>
+      {listing.photoUrl ? (
+        <div className="relative mt-4 h-64 overflow-hidden rounded-card border border-hairline-soft bg-white md:h-80">
+          <img
+            src={listing.photoUrl}
+            alt={`${listing.propertyName} floorplan`}
+            referrerPolicy="no-referrer"
+            className="img-enter size-full object-contain"
+          />
+          <a
+            href={listing.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute bottom-3 right-3 rounded-full border border-hairline bg-canvas/90 px-3 py-1.5 text-[13px] font-medium text-ink shadow-tier backdrop-blur-sm transition-colors duration-[var(--duration-micro)] hover:bg-canvas"
+          >
+            More photos at the source ↗
+          </a>
+        </div>
+      ) : (
+        <div className="mt-4 flex h-64 flex-col items-center justify-center gap-2 rounded-card bg-surface-strong md:h-80">
+          <span className="text-[8px] font-bold uppercase tracking-[0.32px] text-muted-soft">
+            Photos stay at the source
+          </span>
+          <a
+            href={listing.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[14px] font-medium text-ink underline"
+          >
+            View photos on the property site ↗
+          </a>
+        </div>
+      )}
 
       <div className="mt-8 flex flex-col gap-10 md:flex-row">
         {/* Left column — 64% */}
@@ -111,6 +149,23 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
                     {a}
                   </span>
                 ))}
+              </div>
+            </section>
+          )}
+
+          {listing.latitude !== null && listing.longitude !== null && (
+            <section className="mt-8 border-t border-hairline-soft pt-6">
+              <h2 className="text-[16px] font-semibold text-ink">Location</h2>
+              <p className="mt-1 text-[14px] text-muted">
+                {listing.address}
+                {listing.neighborhood && ` · ${listing.neighborhood}`}
+              </p>
+              <div className="mt-3">
+                <MiniMap
+                  latitude={listing.latitude}
+                  longitude={listing.longitude}
+                  propertyName={listing.propertyName}
+                />
               </div>
             </section>
           )}
@@ -245,6 +300,39 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Mobile-only sticky CTA: price + apply link always in reach — the
+          full price card sits below the fold on small screens. */}
+      <div
+        className="fixed inset-x-0 bottom-0 z-10 flex items-center justify-between gap-4 border-t border-hairline bg-canvas/95 px-5 pt-3 backdrop-blur-sm md:hidden"
+        style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+      >
+        <div className="min-w-0">
+          {listing.price !== null ? (
+            <p className="text-[18px] font-bold text-ink">
+              {formatPrice(listing.price)}
+              <span className="text-[13px] font-normal text-muted"> /mo</span>
+            </p>
+          ) : (
+            <p className="text-[14px] font-semibold text-muted">
+              Price not listed
+            </p>
+          )}
+          {listing.netEffectiveRent !== null && (
+            <p className="truncate text-[12px] font-medium text-success">
+              ≈ {formatPrice(listing.netEffectiveRent)} net effective
+            </p>
+          )}
+        </div>
+        <a
+          href={listing.sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex h-12 shrink-0 items-center justify-center rounded-[8px] bg-rausch px-5 text-[15px] font-medium text-white transition-colors duration-[var(--duration-micro)] hover:bg-rausch-active"
+        >
+          View at property site ↗
+        </a>
       </div>
     </div>
   );

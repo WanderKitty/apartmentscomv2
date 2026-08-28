@@ -41,7 +41,8 @@ FROM (
     l.price_history, l.events, l.move_in_fees, l.concession, l.description,
     l.trust_score::float8 AS trust_score,
     u.beds::float8 AS beds, u.baths::float8 AS baths, u.sqft,
-    u.amenities AS unit_amenities,
+    u.amenities AS unit_amenities, u.image_url,
+    ST_Y(l.location::geometry) AS latitude, ST_X(l.location::geometry) AS longitude,
     p.name AS property_name, p.address_line1, p.city, p.state, p.zip,
     p.amenities AS community_amenities,
     n.name AS neighborhood_name,
@@ -111,7 +112,8 @@ SELECT
   l.price_history, l.events, l.move_in_fees, l.concession, l.description,
   l.trust_score::float8 AS trust_score,
   u.beds::float8 AS beds, u.baths::float8 AS baths, u.sqft,
-  u.amenities AS unit_amenities,
+  u.amenities AS unit_amenities, u.image_url,
+  ST_Y(l.location::geometry) AS latitude, ST_X(l.location::geometry) AS longitude,
   p.name AS property_name, p.address_line1, p.city, p.state, p.zip,
   p.amenities AS community_amenities,
   n.name AS neighborhood_name,
@@ -162,6 +164,9 @@ type Row = {
   baths: number
   sqft: number | null
   unit_amenities: string[]
+  image_url: string | null
+  latitude: number | null
+  longitude: number | null
   property_name: string
   address_line1: string
   city: string
@@ -217,6 +222,8 @@ function rowToListing(row: Row, now: Date): Listing {
     neighborhood: row.neighborhood_name ?? '',
     city: row.city,
     address: `${row.address_line1}, ${row.city}, ${row.state} ${row.zip}`,
+    latitude: row.latitude,
+    longitude: row.longitude,
     beds: row.beds,
     baths: row.baths,
     sqft: row.sqft,
@@ -231,7 +238,7 @@ function rowToListing(row: Row, now: Date): Listing {
     firstListedAt: row.first_listed_at.toISOString(),
     lastConfirmedAt: row.last_confirmed_at.toISOString(),
     priceHistory: row.price_history.map((e) => ({ at: e.at, from: d(e.from_cents), to: d(e.to_cents) })),
-    photoUrl: null,
+    photoUrl: row.image_url,
     sourceUrl: row.source_url,
     platform: row.source_platform,
     amenities: [...row.unit_amenities, ...row.community_amenities],
@@ -322,6 +329,19 @@ WHERE l.status = 'active'
   AND (cardinality($9::text[]) = 0 OR lower(p.city) = ANY($9::text[]))
 `
 
+// Residual text is a HARD tsquery filter, so phrases the parser leaves
+// behind but no listing text ever contains must not survive into it:
+// bath counts (baths aren't a filter yet) and price-sort words like
+// "cheapest" (a ranking intent, not a keyword) both guaranteed zero
+// results otherwise.
+export function sanitizeResidual(text: string): string {
+  return text
+    .replace(/\b\d+(\.\d+)?\s*(ba|bath|baths|bathroom|bathrooms)\b/gi, ' ')
+    .replace(/\b(cheap|cheapest|affordable|inexpensive|budget)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 const searchParams = (p: ParsedQuery) => [
   p.priceMax === null ? null : p.priceMax * 100,
   p.bedsMin,
@@ -329,7 +349,7 @@ const searchParams = (p: ParsedQuery) => [
   p.shortTerm,
   p.amenities,
   p.neighborhoods,
-  p.residualText,
+  sanitizeResidual(p.residualText),
   p.bedsMax,
   p.cities.map((c) => c.toLowerCase()),
 ]

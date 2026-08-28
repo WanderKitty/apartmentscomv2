@@ -17,4 +17,15 @@ describe("TimeBadges", () => {
     expect(screen.getByText("47 days on market")).toBeInTheDocument();
     expect(screen.getByText("concession added this week")).toBeInTheDocument();
   });
+
+  it("shows a New badge instead of '0 days on market'", () => {
+    render(<TimeBadges events={[]} daysOnMarket={0} now={NOW} />);
+    expect(screen.getByText("New")).toBeInTheDocument();
+    expect(screen.queryByText(/days on market/)).not.toBeInTheDocument();
+  });
+
+  it("singularizes one day on market", () => {
+    render(<TimeBadges events={[]} daysOnMarket={1} now={NOW} />);
+    expect(screen.getByText("1 day on market")).toBeInTheDocument();
+  });
 });
