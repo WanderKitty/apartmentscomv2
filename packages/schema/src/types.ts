@@ -95,6 +95,13 @@ export interface SearchResult {
   listings: Listing[];
   parsed: ParsedQuery;
   totalCount: number;
+  /**
+   * Populated only when totalCount is 0 and at least one filter was active:
+   * which SINGLE filter removal would yield results, with the count it
+   * unlocks and a rebuilt query string for a one-click retry. Empty
+   * otherwise — the non-empty path pays zero extra queries.
+   */
+  relaxationHints: Array<{ drop: string; label: string; count: number; suggestedQuery: string }>;
   timing: {
     parseMs: number;
     searchMs: number;
