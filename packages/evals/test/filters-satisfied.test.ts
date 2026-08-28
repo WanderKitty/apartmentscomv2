@@ -69,6 +69,7 @@ describe('every result satisfies every parsed hard filter', () => {
       expect(r.timing.corpusScraped).toBeGreaterThan(0) // fixture corpus really loaded
       for (const l of r.listings) {
         if (p.bedsMin !== null) expect(l.beds).toBeGreaterThanOrEqual(p.bedsMin)
+        if (p.bedsMax !== null) expect(l.beds).toBeLessThanOrEqual(p.bedsMax)
         if (p.priceMax !== null) expect(l.price === null || l.price <= p.priceMax).toBe(true)
         for (const a of p.amenities) expect(l.amenities).toContain(a)
         if (p.furnished !== null) expect(l.furnished).toBe(p.furnished)

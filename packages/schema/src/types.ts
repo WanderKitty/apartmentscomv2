@@ -79,6 +79,11 @@ export interface ParsedQuery {
   neighborhoods: string[];
   priceMax: number | null;
   bedsMin: number | null;
+  /**
+   * Upper bound on bedrooms. A plain "1 bedroom" query means EXACTLY one
+   * (bedsMin === bedsMax === 1); "1+ br" / "at least 1" leaves this null.
+   */
+  bedsMax: number | null;
   furnished: boolean | null;
   shortTerm: boolean | null;
   amenities: string[];

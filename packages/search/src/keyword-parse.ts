@@ -17,10 +17,22 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
     priceMax = priceMatch[2] === "k" ? n * 1000 : n;
   }
 
+  // Plain "1 bedroom" means EXACTLY one; only an explicit "1+", "at least",
+  // or "or more" phrasing leaves the upper bound open (user ruling).
   let bedsMin: number | null = null;
-  if (/\bstudio\b/.test(q)) bedsMin = 0;
-  const bedsMatch = q.match(/(\d)\s*(?:br|bed|beds|bedroom|bedrooms)\b/);
-  if (bedsMatch) bedsMin = Number(bedsMatch[1]!);
+  let bedsMax: number | null = null;
+  if (/\bstudio\b/.test(q)) {
+    bedsMin = 0;
+    bedsMax = 0;
+  }
+  const bedsMatch = q.match(/(\d)\s*\+?\s*(?:br|bed|beds|bedroom|bedrooms)\b/);
+  if (bedsMatch) {
+    bedsMin = Number(bedsMatch[1]!);
+    const openEnded =
+      new RegExp(`${bedsMatch[1]}\\s*\\+`).test(q) ||
+      /at least|or more|minimum/.test(q);
+    bedsMax = openEnded ? null : bedsMin;
+  }
 
   const furnished = /\bunfurnished\b/.test(q)
     ? false
@@ -48,6 +60,7 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
     neighborhoods,
     priceMax,
     bedsMin,
+    bedsMax,
     furnished,
     shortTerm,
     amenities,

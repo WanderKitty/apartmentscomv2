@@ -55,6 +55,7 @@ FROM (
   WHERE l.status = 'active'
     AND ($1::int IS NULL OR l.price_cents IS NULL OR l.price_cents <= $1)
     AND ($2::int IS NULL OR u.beds >= $2)
+    AND ($8::int IS NULL OR u.beds <= $8)
     AND ($3::boolean IS NULL OR (l.furnished IS TRUE) = $3)
     AND ($4::boolean IS NULL OR
          (CASE WHEN $4 THEN l.lease_term IN ('short','both')
@@ -261,6 +262,7 @@ JOIN properties p ON p.id = l.property_id
 WHERE l.status = 'active'
   AND ($1::int IS NULL OR l.price_cents IS NULL OR l.price_cents <= $1)
   AND ($2::int IS NULL OR u.beds >= $2)
+  AND ($8::int IS NULL OR u.beds <= $8)
   AND ($3::boolean IS NULL OR (l.furnished IS TRUE) = $3)
   AND ($4::boolean IS NULL OR
        (CASE WHEN $4 THEN l.lease_term IN ('short','both')
@@ -280,6 +282,7 @@ const searchParams = (p: ParsedQuery) => [
   p.amenities,
   p.neighborhoods,
   p.residualText,
+  p.bedsMax,
 ]
 
 type DropCandidate = { drop: string; label: string; strip: (p: ParsedQuery) => ParsedQuery }
@@ -291,7 +294,17 @@ function activeDrops(p: ParsedQuery): DropCandidate[] {
   if (p.priceMax !== null)
     out.push({ drop: 'priceMax', label: `Under $${p.priceMax.toLocaleString('en-US')}`, strip: (q) => ({ ...q, priceMax: null }) })
   if (p.bedsMin !== null)
-    out.push({ drop: 'bedsMin', label: p.bedsMin === 0 ? 'Studio' : `${p.bedsMin}+ bd`, strip: (q) => ({ ...q, bedsMin: null }) })
+    out.push({
+      drop: 'beds',
+      label:
+        p.bedsMax === p.bedsMin
+          ? p.bedsMin === 0
+            ? 'Studio'
+            : `${p.bedsMin} bd`
+          : `${p.bedsMin}+ bd`,
+      // Bed bounds travel together: dropping "beds" drops both.
+      strip: (q) => ({ ...q, bedsMin: null, bedsMax: null }),
+    })
   if (p.furnished !== null)
     out.push({ drop: 'furnished', label: p.furnished ? 'Furnished' : 'Unfurnished', strip: (q) => ({ ...q, furnished: null }) })
   if (p.shortTerm !== null)
@@ -304,7 +317,8 @@ function activeDrops(p: ParsedQuery): DropCandidate[] {
 /** Lossy natural-query reconstruction from the remaining filters. */
 function rebuildQuery(p: ParsedQuery): string {
   const parts: string[] = []
-  if (p.bedsMin !== null) parts.push(p.bedsMin === 0 ? 'studio' : `${p.bedsMin}br`)
+  if (p.bedsMin !== null)
+    parts.push(p.bedsMin === 0 ? 'studio' : `${p.bedsMin}${p.bedsMax === null ? '+' : ''}br`)
   if (p.neighborhoods.length > 0) parts.push(`in ${p.neighborhoods[0]}`)
   if (p.priceMax !== null) parts.push(`under $${p.priceMax}`)
   parts.push(...p.amenities)

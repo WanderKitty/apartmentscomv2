@@ -5,6 +5,7 @@ const LLM_OUT = {
   neighborhoods: ["Lake Eola Heights"],
   price_max_dollars: 2400,
   beds_min: 2,
+  beds_max: 2,
   furnished: null,
   short_term: null,
   amenities: ["pet friendly", "in-unit laundry"],
