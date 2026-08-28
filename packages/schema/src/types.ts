@@ -72,6 +72,9 @@ export interface Listing {
   alsoListedOn: Array<{ platform: string; price: number | null }>;
   /** liberal_dedup_cluster carried through for the search-layer collapse. */
   dedupCluster: string;
+  /** WGS84 coordinates for the map view. null when the source had no location. */
+  lat: number | null;
+  lng: number | null;
 }
 
 /** Output of the query-parse step (§6.1). */
@@ -110,6 +113,15 @@ export interface SearchResult {
    * otherwise — the non-empty path pays zero extra queries.
    */
   relaxationHints: Array<{ drop: string; label: string; count: number; suggestedQuery: string }>;
+  /**
+   * Boundaries of the neighborhoods the parse matched, for the map view.
+   * Empty when no neighborhood filter is active — the common path pays
+   * zero extra queries.
+   */
+  neighborhoodBoundaries: Array<{
+    name: string;
+    geojson: { type: "MultiPolygon"; coordinates: number[][][][] };
+  }>;
   timing: {
     parseMs: number;
     searchMs: number;

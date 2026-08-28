@@ -193,6 +193,34 @@ describe('postgres SearchService', () => {
     expect(r.listings[0]!.score.textRelevance).toBeGreaterThan(0)
   })
 
+  it('carries listing coordinates for the map view', async () => {
+    const r = await service().search('')
+    expect(r.listings.length).toBeGreaterThan(0)
+    for (const l of r.listings) {
+      // Seed corpus is all Orlando: every coordinate lands in the metro box.
+      expect(l.lat).toBeGreaterThan(28.3)
+      expect(l.lat).toBeLessThan(28.8)
+      expect(l.lng).toBeGreaterThan(-81.6)
+      expect(l.lng).toBeLessThan(-81.1)
+    }
+    const detail = await service().getListing('seed___u0001')
+    expect(detail!.lat).not.toBeNull()
+    expect(detail!.lng).not.toBeNull()
+  })
+
+  it('returns the searched neighborhood boundary as GeoJSON, and none otherwise', async () => {
+    const r = await service().search('2br near Lake Eola')
+    expect(r.parsed.neighborhoods).toEqual(['Lake Eola Heights'])
+    expect(r.neighborhoodBoundaries).toHaveLength(1)
+    const b = r.neighborhoodBoundaries[0]!
+    expect(b.name).toBe('Lake Eola Heights')
+    expect(b.geojson.type).toBe('MultiPolygon')
+    expect(Array.isArray(b.geojson.coordinates)).toBe(true)
+
+    const plain = await service().search('1 bed')
+    expect(plain.neighborhoodBoundaries).toEqual([])
+  })
+
   // Last: inserts an extra listing, which would otherwise shift the
   // corpus/totalCount assertions the earlier tests depend on.
   it('labels a net-effective discount without a structured concession as "Special rate"', async () => {

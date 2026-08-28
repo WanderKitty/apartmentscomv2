@@ -3,6 +3,9 @@ import { SearchBar } from "@/components/SearchBar";
 import { ParseEcho } from "@/components/ParseEcho";
 import { ListingCard } from "@/components/ListingCard";
 import { SeedBanner } from "@/components/SeedBanner";
+import { ResultsSplit } from "@/components/ResultsSplit";
+import type { MapPin } from "@/components/MapView";
+import { pinPositions } from "@/lib/map-pins";
 import { searchService } from "@/lib/search";
 
 const EXAMPLE_QUERIES = [
@@ -73,14 +76,33 @@ export default async function Home(props: PageProps<"/">) {
     );
   }
 
-  const { listings, parsed, totalCount, timing, relaxationHints } =
-    await searchService.search(q);
+  const {
+    listings,
+    parsed,
+    totalCount,
+    timing,
+    relaxationHints,
+    neighborhoodBoundaries,
+  } = await searchService.search(q);
   const debugToggleHref = debug
     ? `/?q=${encodeURIComponent(q)}`
     : `/?q=${encodeURIComponent(q)}&debug=1`;
 
+  const pinCards = new Map(listings.map((l) => [l.id, l]));
+  const pins: MapPin[] = pinPositions(listings).map((p) => {
+    const l = pinCards.get(p.id)!;
+    return {
+      ...p,
+      propertyName: l.propertyName,
+      price: l.price,
+      beds: l.beds,
+      baths: l.baths,
+      neighborhood: l.neighborhood,
+    };
+  });
+
   return (
-    <div className="mx-auto w-full max-w-[880px] px-6 pb-16 pt-8">
+    <div className="mx-auto w-full max-w-[880px] px-6 pb-16 pt-8 lg:max-w-[1320px]">
       <SearchBar defaultValue={q} />
 
       <div className="mt-4">
@@ -95,7 +117,9 @@ export default async function Home(props: PageProps<"/">) {
         </p>
       </div>
 
-      <div className="mt-6 flex items-baseline justify-between border-b border-hairline-soft pb-3">
+      <div className="mt-6">
+      <ResultsSplit pins={pins} boundaries={neighborhoodBoundaries}>
+      <div className="flex items-baseline justify-between border-b border-hairline-soft pb-3">
         <p className="text-[14px] text-body">
           <span className="font-semibold text-ink">{totalCount}</span>{" "}
           {totalCount === 1 ? "listing" : "listings"} · ranked by relevance,
@@ -146,6 +170,8 @@ export default async function Home(props: PageProps<"/">) {
           ))}
         </ul>
       )}
+      </ResultsSplit>
+      </div>
     </div>
   );
 }
