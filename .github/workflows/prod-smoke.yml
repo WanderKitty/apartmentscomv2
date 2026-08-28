@@ -1,0 +1,38 @@
+name: Prod Smoke
+on:
+  deployment_status:
+  schedule: [{ cron: "35 10 * * *" }]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    # Runs after every successful production deploy, once daily (post-scrape),
+    # and on demand. Read-only against the live site.
+    if: >-
+      github.event_name != 'deployment_status' ||
+      (github.event.deployment_status.state == 'success' &&
+       contains(fromJSON('["Production","production"]'), github.event.deployment_status.environment))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROD_URL: ${{ github.event.deployment_status.environment_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+      - run: pnpm --filter @aptv2/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @aptv2/web test:e2e:prod
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: prod-smoke-report
+          path: apps/web/playwright-report
+          retention-days: 7

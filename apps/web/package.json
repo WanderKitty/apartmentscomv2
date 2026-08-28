@@ -8,6 +8,7 @@
     "start": "next start",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:prod": "playwright test --config playwright.prod.config.ts",
     "e2e:server": "tsx e2e/prepare-db.mts && next build && next start -p 3111",
     "typecheck": "next typegen && tsc --noEmit",
     "lint": "eslint"
