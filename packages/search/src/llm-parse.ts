@@ -24,6 +24,12 @@ const SYSTEM = `You convert one apartment-search query into filters. Extract ONL
 // round-trip lands as "llm" rather than falling open mid-demo.
 const DEFAULT_TIMEOUT_MS = 2500;
 
+// Guardrails: the query arrives via a public GET parameter. An oversized one
+// never reaches the paid LLM rung (no real apartment search needs more), and
+// the cache is bounded FIFO so unique-query spam can't grow process memory.
+const MAX_LLM_QUERY_CHARS = 300;
+const MAX_CACHE_ENTRIES = 500;
+
 const cache = new Map<string, ParsedQuery>();
 export function __resetParseCacheForTests(): void {
   cache.clear();
@@ -54,7 +60,7 @@ export async function parseQueryWith(
   if (hit) return { ...hit, parseSource: "cache", parseMs: 0 };
 
   const fallback = (): ParsedQuery => parseQueryKeywords(raw);
-  if (!client) return fallback();
+  if (!client || raw.length > MAX_LLM_QUERY_CHARS) return fallback();
 
   const started = performance.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -87,6 +93,7 @@ export async function parseQueryWith(
       parseSource: "llm",
       parseMs: Math.round(performance.now() - started),
     };
+    if (cache.size >= MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
     cache.set(key, parsed);
     return parsed;
   } catch {

@@ -60,3 +60,24 @@ describe("parseQueryWith", () => {
     expect(p.parseSource).toBe("fallback");
   });
 });
+
+describe("guardrails", () => {
+  it("never sends an oversized query to the LLM — straight to the keyword rung", async () => {
+    const client = fakeClient(LLM_OUT);
+    const p = await parseQueryWith(`2br downtown ${"x".repeat(400)}`, client as never);
+    expect(client.messages.parse).not.toHaveBeenCalled();
+    expect(p.parseSource).toBe("fallback");
+    expect(p.bedsMin).toBe(2);
+  });
+
+  it("evicts the oldest cache entry when full, keeps recent ones", async () => {
+    const client = fakeClient(LLM_OUT);
+    await parseQueryWith("query 0", client as never);
+    for (let i = 1; i <= 500; i++) await parseQueryWith(`query ${i}`, client as never);
+    const callsBefore = client.messages.parse.mock.calls.length;
+    expect((await parseQueryWith("query 500", client as never)).parseSource).toBe("cache");
+    const evicted = await parseQueryWith("query 0", client as never);
+    expect(evicted.parseSource).toBe("llm");
+    expect(client.messages.parse.mock.calls.length).toBe(callsBefore + 1);
+  });
+});
