@@ -62,6 +62,20 @@ describe("ListingCard", () => {
     expect(screen.getAllByText("New")).toHaveLength(1);
   });
 
+  it("falls back to the city in the meta line when neighborhood is empty, no dangling separator", () => {
+    const camellia = byId("seed___u0001");
+    const listing = { ...camellia, neighborhood: "", city: "Tampa" };
+    render(<ListingCard listing={listing} now={NOW} />);
+    expect(screen.getByText(/^Tampa · /)).toBeInTheDocument();
+  });
+
+  it("keeps showing the neighborhood in the meta line when it is non-empty", () => {
+    const camellia = byId("seed___u0001");
+    render(<ListingCard listing={camellia} now={NOW} />);
+    expect(screen.getByText(/^Lake Eola Heights · /)).toBeInTheDocument();
+  });
+
+
   it("hides score components unless debug is on", () => {
     const { rerender } = render(
       <ListingCard listing={byId("seed___u0001")} now={NOW} />,

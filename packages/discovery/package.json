@@ -1,0 +1,27 @@
+{
+  "name": "@aptv2/discovery",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "discover": "tsx src/discover-cli.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.121.0",
+    "@aptv2/db": "workspace:*",
+    "@aptv2/schema": "workspace:*",
+    "@aptv2/scrapers": "workspace:*",
+    "dotenv": "^16.4.0",
+    "pg": "^8.13.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0",
+    "tsx": "^4.19.0"
+  }
+}

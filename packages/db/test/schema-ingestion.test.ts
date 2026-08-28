@@ -58,3 +58,21 @@ describe('migration 0006 ingestion fields', () => {
     expect(rows[0].extracted.pets_allowed).toBe('allowed')
   })
 })
+
+describe('migration 0008 partial processing status', () => {
+  it('accepts processing_status = partial and rejects an unrecognized value', async () => {
+    const { rows } = await pool.query(
+      `INSERT INTO raw_snapshots (source_id, content_hash, payload, processing_status)
+       VALUES ($1, 'partial-hash', '{}', 'partial') RETURNING processing_status`,
+      [sourceId],
+    )
+    expect(rows[0].processing_status).toBe('partial')
+    await expect(
+      pool.query(
+        `INSERT INTO raw_snapshots (source_id, content_hash, payload, processing_status)
+         VALUES ($1, 'bogus-hash', '{}', 'bogus')`,
+        [sourceId],
+      ),
+    ).rejects.toThrow(/raw_snapshots_processing_status_check/)
+  })
+})

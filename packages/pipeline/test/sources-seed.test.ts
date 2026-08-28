@@ -26,12 +26,12 @@ describe('sources seed', () => {
     }
   })
 
-  it('marks embedded-variant sources (not yet parsed) as disabled, REST/known-embedded sources as enabled', () => {
+  it('marks all seeded sources enabled — every known embedded shape (v1, v2, rentpress) now has an extractor', () => {
     const byName = Object.fromEntries(SOURCES_SEED.map((s) => [s.name, s.enabled]))
     expect(byName['Current Orlando']).toBe(true)
     expect(byName['Society Orlando']).toBe(true)
-    expect(byName['Aperture']).toBe(false)
-    expect(byName['Knightsbridge at Stoneybrook']).toBe(false)
+    expect(byName['Aperture']).toBe(true)
+    expect(byName['Knightsbridge at Stoneybrook']).toBe(true)
   })
 
   it('seeds idempotently by website_url, including the enabled flag', async () => {
@@ -42,7 +42,22 @@ describe('sources seed', () => {
     expect(rows.length).toBe(SOURCES_SEED.length)
     const byName = Object.fromEntries(rows.map((r) => [r.name, r.enabled]))
     expect(byName['Current Orlando']).toBe(true)
-    expect(byName['Aperture']).toBe(false)
-    expect(byName['Knightsbridge at Stoneybrook']).toBe(false)
+    expect(byName['Aperture']).toBe(true)
+    expect(byName['Knightsbridge at Stoneybrook']).toBe(true)
+  })
+
+  it('an ops-decided manual disable survives a reseed (ON CONFLICT must not overwrite enabled)', async () => {
+    await seedSources(pool)
+    await pool.query(`UPDATE sources SET enabled = false WHERE name = 'Current Orlando'`)
+    await seedSources(pool)
+    try {
+      const { rows } = await pool.query(`SELECT enabled FROM sources WHERE name = 'Current Orlando'`)
+      expect(rows[0].enabled).toBe(false)
+    } finally {
+      // This test DB is shared across the whole run (M8c) — restore the
+      // seed's own default so a later suite in the same run never inherits
+      // a disabled source left over from this test's assertion setup.
+      await pool.query(`UPDATE sources SET enabled = true WHERE name = 'Current Orlando'`)
+    }
   })
 })

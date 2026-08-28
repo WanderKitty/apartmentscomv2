@@ -6,6 +6,9 @@ import { Hero } from "@/components/Hero";
 import { ListingCard } from "@/components/ListingCard";
 import { ResultsSkeleton } from "@/components/ResultsSkeleton";
 import { SeedBanner } from "@/components/SeedBanner";
+import { ResultsSplit } from "@/components/ResultsSplit";
+import type { MapPin } from "@/components/MapView";
+import { pinPositions } from "@/lib/map-pins";
 import { searchService } from "@/lib/search";
 
 export default async function Home(props: PageProps<"/">) {
@@ -44,11 +47,24 @@ async function SearchResults({
   debug: boolean;
   now: Date;
 }) {
-  const { listings, parsed, totalCount, timing, relaxationHints } =
+  const { listings, parsed, totalCount, timing, relaxationHints, neighborhoodBoundaries } =
     await searchService.search(q);
   const debugToggleHref = debug
     ? `/?q=${encodeURIComponent(q)}`
     : `/?q=${encodeURIComponent(q)}&debug=1`;
+
+  const pinCards = new Map(listings.map((l) => [l.id, l]));
+  const pins: MapPin[] = pinPositions(listings).map((p) => {
+    const l = pinCards.get(p.id)!;
+    return {
+      ...p,
+      propertyName: l.propertyName,
+      price: l.price,
+      beds: l.beds,
+      baths: l.baths,
+      neighborhood: l.neighborhood,
+    };
+  });
 
   return (
     <div>
@@ -64,7 +80,9 @@ async function SearchResults({
         </p>
       </div>
 
-      <div className="mt-6 flex items-baseline justify-between border-b border-hairline-soft pb-3">
+      <div className="mt-6">
+      <ResultsSplit pins={pins} boundaries={neighborhoodBoundaries}>
+      <div className="flex items-baseline justify-between border-b border-hairline-soft pb-3">
         <p className="text-[14px] text-body">
           <span className="font-semibold text-ink">{totalCount}</span>{" "}
           {totalCount === 1 ? "listing" : "listings"} · ranked by relevance,
@@ -117,6 +135,8 @@ async function SearchResults({
           ))}
         </ul>
       )}
+      </ResultsSplit>
+      </div>
     </div>
   );
 }

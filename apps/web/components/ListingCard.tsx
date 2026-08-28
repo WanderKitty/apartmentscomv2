@@ -27,7 +27,7 @@ export function ListingCard({
     formatBedsBaths(listing.beds, listing.baths),
     formatSqft(listing.sqft),
   ].filter(Boolean);
-  const metaLine = `${listing.neighborhood ? `${listing.neighborhood} · ` : ""}${facts.join(" · ")}`;
+  const metaLine = `${listing.neighborhood || listing.city ? `${listing.neighborhood || listing.city} · ` : ""}${facts.join(" · ")}`;
 
   return (
     <li

@@ -71,6 +71,37 @@ describe('createPoliteFetcher', () => {
     expect(sleeps.some((ms) => ms >= 4999)).toBe(true)
   })
 
+  it('a per-call maxRps overrides the fetcher default spacing for that call', async () => {
+    const sleeps: number[] = []
+    let clock = 0
+    const { impl } = fakeFetch([{ status: 200 }, { status: 200 }])
+    // Fetcher default is the usual 1 req/s; this source is throttled to
+    // 0.5 req/s (source.rate_limit_rps), which must win for this call.
+    const f = createPoliteFetcher({
+      fetchImpl: impl,
+      now: () => clock,
+      sleep: async (ms) => {
+        sleeps.push(ms)
+        clock += ms
+      },
+    })
+    await f.fetchJson('https://example.com/a', null, { maxRps: 0.5 })
+    await f.fetchJson('https://example.com/b', null, { maxRps: 0.5 })
+    expect(sleeps.some((ms) => ms >= 1999)).toBe(true)
+  })
+
+  it('refuses a query-string-disallowed URL before sending (review IMPORTANT 3: path+query, not path alone)', async () => {
+    const { impl } = fakeFetch([{ status: 200 }])
+    const f = createPoliteFetcher({ fetchImpl: impl, sleep: async () => {} })
+    // Google REP wildcard rule from robots.ts's own tests — only reachable
+    // live if the gate checks pathname+search, not pathname alone.
+    const policy = parseRobots('User-agent: *\nDisallow: /*?s=\n', USER_AGENT)
+    await expect(f.fetchJson('https://example.com/search?s=test', policy)).rejects.toBeInstanceOf(
+      RobotsDisallowedError,
+    )
+    expect(impl).not.toHaveBeenCalled()
+  })
+
   it('a retry never sleeps shorter than the crawl-delay (review IMPORTANT 3)', async () => {
     const sleeps: number[] = []
     let clock = 0
@@ -102,6 +133,19 @@ describe('createPoliteFetcher', () => {
     const g = createPoliteFetcher({ fetchImpl: always503.impl, sleep: async () => {} })
     await expect(g.fetchJson('https://example.com/dead', null)).rejects.toThrow(/503/)
     expect(always503.impl).toHaveBeenCalledTimes(3)
+  })
+
+  it('with retry429: false, a 429 is terminal (throws immediately, no retry); 5xx retry is unaffected', async () => {
+    const always429 = fakeFetch([{ status: 429 }])
+    const f = createPoliteFetcher({ fetchImpl: always429.impl, sleep: async () => {}, retry429: false })
+    await expect(f.fetchJson('https://example.com/limited', null)).rejects.toThrow(/429/)
+    expect(always429.impl).toHaveBeenCalledTimes(1) // no retry attempts
+
+    const flaky503 = fakeFetch([{ status: 503 }, { status: 200, body: { ok: 1 } }])
+    const g = createPoliteFetcher({ fetchImpl: flaky503.impl, sleep: async () => {}, retry429: false })
+    const r = await g.fetchJson('https://example.com/flaky', null)
+    expect(r.status).toBe(200) // 5xx still retries even with retry429: false
+    expect(flaky503.impl).toHaveBeenCalledTimes(2)
   })
 })
 

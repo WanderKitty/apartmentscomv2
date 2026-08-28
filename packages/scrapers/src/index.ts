@@ -4,7 +4,9 @@ export {
   RobotsDisallowedError,
   createPoliteFetcher,
   sha256Json,
+  coerceMaxRps,
   type PoliteFetcher,
+  type FetchOpts,
 } from './politeness'
 export type { Adapter, RawSnapshotInput, SourceRow } from './types'
-export { entrataAdapter, parseEntrataPayload, EntrataPayloadError, type EntrataUnit } from './entrata'
+export { entrataAdapter, parseEntrataPayload, extractEmbeddedJson, EntrataPayloadError, type EntrataUnit } from './entrata'

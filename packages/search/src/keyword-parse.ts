@@ -1,12 +1,29 @@
-import { AMENITY_KEYWORDS, NEIGHBORHOOD_ALIASES, type ParsedQuery } from "@aptv2/schema";
+import { AMENITY_KEYWORDS, FLORIDA_CITIES, NEIGHBORHOOD_ALIASES, type ParsedQuery } from "@aptv2/schema";
+
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Whole-word/phrase match for a literal term (city name, amenity keyword). */
+const wordRegex = (term: string) => new RegExp(`\\b${escapeRegex(term.toLowerCase())}\\b`);
 
 /** Deterministic keyword rung of the fail-open ladder (spec §6.1). */
 export function parseQueryKeywords(raw: string): ParsedQuery {
   const q = raw.toLowerCase();
 
-  const neighborhoods = Object.entries(NEIGHBORHOOD_ALIASES)
-    .filter(([, aliases]) => aliases.some((a) => q.includes(a)))
-    .map(([name]) => name);
+  const matchedNeighborhoods = Object.entries(NEIGHBORHOOD_ALIASES).filter(([, aliases]) =>
+    aliases.some((a) => q.includes(a)),
+  );
+  const neighborhoods = matchedNeighborhoods.map(([name]) => name);
+
+  // Neighborhood aliases take precedence over city names: mask out matched
+  // alias text before scanning for cities so a city name that only occurs
+  // inside an already-matched alias (e.g. "orlando" in "downtown orlando")
+  // is not also emitted as a separate city filter.
+  let cityScanText = q;
+  for (const [, aliases] of matchedNeighborhoods) {
+    for (const a of aliases) {
+      if (cityScanText.includes(a)) cityScanText = cityScanText.split(a).join(" ".repeat(a.length));
+    }
+  }
+  const cities = FLORIDA_CITIES.filter((c) => wordRegex(c).test(cityScanText));
 
   const priceMatch = q.match(
     /(?:under|below|less than|<=?|max)\s*\$?\s*([\d,]+)\s*(k?)/,
@@ -18,7 +35,7 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
   }
 
   // Plain "1 bedroom" means EXACTLY one; only an explicit "1+", "at least",
-  // or "or more" phrasing leaves the upper bound open (user ruling).
+  // or "or more" phrasing leaves the upper bound open.
   let bedsMin: number | null = null;
   let bedsMax: number | null = null;
   if (/\bstudio\b/.test(q)) {
@@ -44,26 +61,48 @@ export function parseQueryKeywords(raw: string): ParsedQuery {
     ? true
     : null;
 
+  // Whole-word/phrase match (not q.includes(k)): a plain substring match let
+  // "washer" match inside "dishwasher", false-positiving in-unit laundry.
   const amenities = Object.entries(AMENITY_KEYWORDS)
-    .filter(([, keywords]) => keywords.some((k) => q.includes(k)))
+    .filter(([, keywords]) => keywords.some((k) => wordRegex(k).test(q)))
     .map(([name]) => name);
+
+  // Ordering intent, not a constraint: "cheapest" ranks matches by price —
+  // it is not priceMax and must not fall through to the residual FTS gate.
+  // "smallest"/"biggest" order by square footage (apartment-speak for size).
+  let sort: ParsedQuery["sort"] = "relevance";
+  if (/\b(cheapest|cheap(er)?|lowest (price|rent)|most affordable)\b/.test(q)) {
+    sort = "price_asc";
+  } else if (/\b(most expensive|priciest|highest (price|rent))\b/.test(q)) {
+    sort = "price_desc";
+  } else if (/\b(smallest|smaller|least space)\b/.test(q)) {
+    sort = "sqft_asc";
+  } else if (/\b(biggest|bigger|largest|larger|most space)\b/.test(q)) {
+    sort = "sqft_desc";
+  } else if (/\b(newest|just (listed|added)|most recent)\b/.test(q)) {
+    sort = "newest";
+  }
 
   const recognizedAnything =
     neighborhoods.length > 0 ||
+    cities.length > 0 ||
     priceMax !== null ||
     bedsMin !== null ||
     furnished !== null ||
     shortTerm !== null ||
-    amenities.length > 0;
+    amenities.length > 0 ||
+    sort !== "relevance";
 
   return {
     neighborhoods,
+    cities,
     priceMax,
     bedsMin,
     bedsMax,
     furnished,
     shortTerm,
     amenities,
+    sort,
     // Fail-open ladder (§6.1): nothing recognized → raw text runs as FTS.
     residualText: recognizedAnything ? "" : raw.trim(),
     failedOpen: !recognizedAnything && raw.trim().length > 0,

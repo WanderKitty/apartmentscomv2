@@ -39,6 +39,8 @@ export interface Listing {
   propertyId: string;
   propertyName: string;
   neighborhood: string;
+  /** Display fallback when neighborhood is empty (Plan 6 Task 4). */
+  city: string;
   address: string;
   /** Null when the stored row has no location (listings.location is nullable);
    * consumers must gate map UI on both being present. */
@@ -75,11 +77,17 @@ export interface Listing {
   alsoListedOn: Array<{ platform: string; price: number | null }>;
   /** liberal_dedup_cluster carried through for the search-layer collapse. */
   dedupCluster: string;
+  /** WGS84 coordinates for the map view. null when the source had no location. */
+  lat: number | null;
+  lng: number | null;
 }
 
 /** Output of the query-parse step (§6.1). */
 export interface ParsedQuery {
   neighborhoods: string[];
+  /** Closed enum (FLORIDA_CITIES). Neighborhood aliases take precedence
+   * when both could match the same text. */
+  cities: string[];
   priceMax: number | null;
   bedsMin: number | null;
   /**
@@ -90,6 +98,19 @@ export interface ParsedQuery {
   furnished: boolean | null;
   shortTerm: boolean | null;
   amenities: string[];
+  /**
+   * Ordering intent. Filters constrain WHICH listings match; sort says in
+   * what order they render. "cheapest" is a sort, not a price filter — it
+   * must never surface as priceMax, and it must not fall through to the
+   * residual-text FTS gate either.
+   */
+  sort:
+    | "relevance"
+    | "price_asc"
+    | "price_desc"
+    | "newest"
+    | "sqft_asc"
+    | "sqft_desc";
   residualText: string;
   /** True when the parse fail-open ladder kicked in (raw text as FTS). */
   failedOpen: boolean;
@@ -110,6 +131,15 @@ export interface SearchResult {
    * otherwise — the non-empty path pays zero extra queries.
    */
   relaxationHints: Array<{ drop: string; label: string; count: number; suggestedQuery: string }>;
+  /**
+   * Boundaries of the neighborhoods the parse matched, for the map view.
+   * Empty when no neighborhood filter is active — the common path pays
+   * zero extra queries.
+   */
+  neighborhoodBoundaries: Array<{
+    name: string;
+    geojson: { type: "MultiPolygon"; coordinates: number[][][][] };
+  }>;
   timing: {
     parseMs: number;
     searchMs: number;

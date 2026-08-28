@@ -102,7 +102,9 @@ export default async function ListingPage(props: PageProps<"/listing/[id]">) {
           </h1>
           <p className="mt-1 text-[14px] text-muted">
             {listing.address}
-            {listing.neighborhood && ` · ${listing.neighborhood}`}
+            {(listing.neighborhood || listing.city) && (
+              <> · {listing.neighborhood || listing.city}</>
+            )}
           </p>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">

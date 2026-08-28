@@ -10,3 +10,4 @@ test-results/
 .vercel
 .env*
 !.env.example
+discovery-report-*.json

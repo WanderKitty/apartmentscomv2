@@ -20,6 +20,10 @@ import { parseQuery } from './llm-parse'
 const FRESHNESS_HALF_LIFE_SECONDS = 3 * 86_400 // spec §5.5
 
 const SEARCH_SQL = `
+-- Wrapped one level deeper so ORDER BY's CASE can see score_total: Postgres
+-- output aliases are usable BARE in ORDER BY but neither qualified
+-- (q.score_total) nor inside a CASE expression.
+SELECT * FROM (
 SELECT q.*,
        (0.35 * q.text_rel + 0.30 * q.freshness + 0.25 * q.trust_score + 0.10 * q.proximity) AS score_total
 FROM (
@@ -42,8 +46,14 @@ FROM (
     p.name AS property_name, p.address_line1, p.city, p.state, p.zip,
     p.amenities AS community_amenities,
     n.name AS neighborhood_name,
-    CASE WHEN $7 <> ''
-         THEN LEAST(1.0, ts_rank(l.search_tsv, plainto_tsquery('english', $7))::float8 * 10)
+    ST_Y(l.location::geometry) AS lat, ST_X(l.location::geometry) AS lng,
+    -- Text affinity is a RANKING signal computed from the full raw query
+    -- ($11) — never a filter. The residual text ($7) stays the only FTS
+    -- gate in the WHERE clause, so a fully-parsed query filters on
+    -- structure while its literal matches still rank higher (before this,
+    -- text_rel was residual-only and read 0.00 for every parsed query).
+    CASE WHEN $11 <> ''
+         THEN LEAST(1.0, ts_rank(l.search_tsv, plainto_tsquery('english', $11))::float8 * 10)
          ELSE 0 END AS text_rel,
     power(0.5, EXTRACT(EPOCH FROM (now() - l.last_confirmed_at))::float8 / ${FRESHNESS_HALF_LIFE_SECONDS}) AS freshness,
     COALESCE((SELECT GREATEST(0.0,
@@ -66,8 +76,22 @@ FROM (
           SELECT 1 FROM neighborhoods nh2
           WHERE nh2.name = ANY($6::text[]) AND ST_Covers(nh2.boundary, l.location)))
     AND ($7 = '' OR l.search_tsv @@ plainto_tsquery('english', $7))
+    AND (cardinality($9::text[]) = 0 OR lower(p.city) = ANY($9::text[]))
 ) q
-ORDER BY (q.price_cents IS NULL) ASC, score_total DESC, q.source_platform, q.source_external_id
+) s
+-- $10 = ordering intent from the parse ("cheapest" etc. is a sort, not a
+-- filter). Undisclosed price always sorts last; the "relevance" default is
+-- score_total DESC expressed as one ascending key (-score_total ASC).
+ORDER BY (s.price_cents IS NULL) ASC,
+  CASE $10
+    WHEN 'price_asc'  THEN s.price_cents::float8
+    WHEN 'price_desc' THEN -s.price_cents::float8
+    WHEN 'newest'     THEN -EXTRACT(EPOCH FROM s.first_listed_at)::float8
+    WHEN 'sqft_asc'   THEN s.sqft::float8
+    WHEN 'sqft_desc'  THEN -s.sqft::float8
+    ELSE -s.score_total
+  END ASC NULLS LAST,
+  s.source_platform, s.source_external_id
 -- Safety valve: pagination is future work; the returned page is what
 -- collapse operates on, so this bounds the collapse/render cost per request.
 LIMIT 500
@@ -93,6 +117,7 @@ SELECT
   p.name AS property_name, p.address_line1, p.city, p.state, p.zip,
   p.amenities AS community_amenities,
   n.name AS neighborhood_name,
+  ST_Y(l.location::geometry) AS lat, ST_X(l.location::geometry) AS lng,
   0::float8 AS text_rel,
   power(0.5, EXTRACT(EPOCH FROM (now() - l.last_confirmed_at))::float8 / ${FRESHNESS_HALF_LIFE_SECONDS}) AS freshness,
   0::float8 AS proximity,
@@ -149,6 +174,8 @@ type Row = {
   zip: string
   community_amenities: string[]
   neighborhood_name: string | null
+  lat: number | null
+  lng: number | null
   text_rel: number
   freshness: number
   proximity: number
@@ -157,6 +184,8 @@ type Row = {
 
 const d = (c: number) => Math.round(c / 100)
 
+// Keep in sync with packages/schema/src/seed.ts's trueCostOf — signatures
+// differ (Row vs ProcessedUnitData) so extraction isn't worth it.
 function trueCostOf(row: Row): TrueCost | null {
   if (row.price_cents === null) return null
   const fees = row.move_in_fees.map((f) => ({ label: f.label, amount: d(f.amount_cents) }))
@@ -191,6 +220,7 @@ function rowToListing(row: Row, now: Date): Listing {
     propertyId: row.collapse_key,
     propertyName: row.property_name,
     neighborhood: row.neighborhood_name ?? '',
+    city: row.city,
     address: `${row.address_line1}, ${row.city}, ${row.state} ${row.zip}`,
     latitude: row.latitude,
     longitude: row.longitude,
@@ -226,11 +256,13 @@ function rowToListing(row: Row, now: Date): Listing {
     daysOnMarket: Math.max(0, Math.round((now.getTime() - row.first_listed_at.getTime()) / 86_400_000)),
     alsoListedOn: [],
     dedupCluster: row.dedup_cluster,
+    lat: row.lat,
+    lng: row.lng,
   }
 }
 
 /** B1 collapse, ported from the demo: cheapest source is the primary card. */
-function collapseDuplicates(listings: Listing[]): Listing[] {
+function collapseDuplicates(listings: Listing[], sort: ParsedQuery["sort"]): Listing[] {
   const byCluster = new Map<string, Listing[]>()
   for (const l of listings) {
     const group = byCluster.get(l.dedupCluster) ?? []
@@ -250,11 +282,26 @@ function collapseDuplicates(listings: Listing[]): Listing[] {
       alsoListedOn: rest.map((r) => ({ platform: r.platform, price: r.price })),
     })
   }
-  // Collapse must not reorder the SQL ranking: sort the collapsed set the
-  // same way the query did (undisclosed price last, then score).
+  // Collapse must not reorder the SQL ranking: re-apply the SAME ordering
+  // the query used (undisclosed price last, then the parsed sort key), or
+  // the TS re-sort silently eats a price/newest ordering the SQL produced.
+  const bySortKey: (a: Listing, b: Listing) => number =
+    sort === "price_asc"
+      ? (a, b) => (a.price ?? Infinity) - (b.price ?? Infinity)
+      : sort === "price_desc"
+        ? (a, b) => (b.price ?? -Infinity) - (a.price ?? -Infinity)
+        : sort === "newest"
+          ? (a, b) => Date.parse(b.firstListedAt) - Date.parse(a.firstListedAt)
+          : sort === "sqft_asc"
+            ? (a, b) => (a.sqft ?? Infinity) - (b.sqft ?? Infinity)
+            : sort === "sqft_desc"
+              ? (a, b) => (b.sqft ?? -Infinity) - (a.sqft ?? -Infinity)
+              : (a, b) => b.score.total - a.score.total
   out.sort((a, b) => {
     if ((a.price === null) !== (b.price === null)) return a.price === null ? 1 : -1
-    return b.score.total - a.score.total
+    const primary = bySortKey(a, b)
+    if (primary !== 0) return primary
+    return a.id.localeCompare(b.id) // stable tiebreak, mirrors SQL's platform/id tail
   })
   return out
 }
@@ -279,6 +326,7 @@ WHERE l.status = 'active'
         SELECT 1 FROM neighborhoods nh2
         WHERE nh2.name = ANY($6::text[]) AND ST_Covers(nh2.boundary, l.location)))
   AND ($7 = '' OR l.search_tsv @@ plainto_tsquery('english', $7))
+  AND (cardinality($9::text[]) = 0 OR lower(p.city) = ANY($9::text[]))
 `
 
 // Residual text is a HARD tsquery filter, so phrases the parser leaves
@@ -303,6 +351,7 @@ const searchParams = (p: ParsedQuery) => [
   p.neighborhoods,
   sanitizeResidual(p.residualText),
   p.bedsMax,
+  p.cities.map((c) => c.toLowerCase()),
 ]
 
 type DropCandidate = { drop: string; label: string; strip: (p: ParsedQuery) => ParsedQuery }
@@ -311,6 +360,8 @@ function activeDrops(p: ParsedQuery): DropCandidate[] {
   const out: DropCandidate[] = []
   if (p.neighborhoods.length > 0)
     out.push({ drop: 'neighborhoods', label: p.neighborhoods.join(', '), strip: (q) => ({ ...q, neighborhoods: [] }) })
+  if (p.cities.length > 0)
+    out.push({ drop: 'city', label: p.cities.join(', '), strip: (q) => ({ ...q, cities: [] }) })
   if (p.priceMax !== null)
     out.push({ drop: 'priceMax', label: `Under $${p.priceMax.toLocaleString('en-US')}`, strip: (q) => ({ ...q, priceMax: null }) })
   if (p.bedsMin !== null)
@@ -337,9 +388,17 @@ function activeDrops(p: ParsedQuery): DropCandidate[] {
 /** Lossy natural-query reconstruction from the remaining filters. */
 function rebuildQuery(p: ParsedQuery): string {
   const parts: string[] = []
+  // Ordering intent survives relaxation hints — dropping a filter must not
+  // silently discard "cheapest".
+  if (p.sort === "price_asc") parts.push("cheapest")
+  else if (p.sort === "price_desc") parts.push("most expensive")
+  else if (p.sort === "newest") parts.push("newest")
+  else if (p.sort === "sqft_asc") parts.push("smallest")
+  else if (p.sort === "sqft_desc") parts.push("biggest")
   if (p.bedsMin !== null)
     parts.push(p.bedsMin === 0 ? 'studio' : `${p.bedsMin}${p.bedsMax === null ? '+' : ''}br`)
   if (p.neighborhoods.length > 0) parts.push(`in ${p.neighborhoods[0]}`)
+  else if (p.cities.length > 0) parts.push(`in ${p.cities[0]}`)
   if (p.priceMax !== null) parts.push(`under $${p.priceMax}`)
   parts.push(...p.amenities)
   if (p.furnished === true) parts.push('furnished')
@@ -367,15 +426,26 @@ export function createSearchService(
       const pool = getPool()
       const parsed = await parse(rawQuery)
       const t0 = performance.now()
-      const [{ rows }, corpusRes] = await Promise.all([
-        pool.query<Row>(SEARCH_SQL, searchParams(parsed)),
+      const [{ rows }, corpusRes, boundaryRes] = await Promise.all([
+        // $1–$9 filters (searchParams), $10 ordering intent, $11 the raw
+        // query for text-affinity ranking (never a filter — see SEARCH_SQL).
+        pool.query<Row>(SEARCH_SQL, [...searchParams(parsed), parsed.sort, rawQuery]),
         pool.query<{ seed: number; scraped: number }>(
           `SELECT count(*) FILTER (WHERE provenance = 'seed')::int AS seed,
                   count(*) FILTER (WHERE provenance = 'scraped')::int AS scraped
            FROM listings WHERE status = 'active'`,
         ),
+        // Map overlay: only when the parse matched neighborhoods, so the
+        // common path pays zero extra queries.
+        parsed.neighborhoods.length > 0
+          ? pool.query<{ name: string; geojson: string }>(
+              `SELECT name, ST_AsGeoJSON(boundary) AS geojson
+               FROM neighborhoods WHERE name = ANY($1::text[])`,
+              [parsed.neighborhoods],
+            )
+          : null,
       ])
-      const collapsed = collapseDuplicates(rows.map((r) => rowToListing(r, now)))
+      const collapsed = collapseDuplicates(rows.map((r) => rowToListing(r, now)), parsed.sort)
       // Zero results with active filters: tell the visitor which SINGLE
       // filter removal would unlock listings — transparency-as-UX, same
       // ethos as the parse echo. Costs queries only on the empty path.
@@ -414,6 +484,10 @@ export function createSearchService(
         parsed,
         totalCount: collapsed.length,
         relaxationHints,
+        neighborhoodBoundaries: (boundaryRes?.rows ?? []).map((b) => ({
+          name: b.name,
+          geojson: JSON.parse(b.geojson),
+        })),
         timing: {
           parseMs: parsed.parseMs,
           searchMs,

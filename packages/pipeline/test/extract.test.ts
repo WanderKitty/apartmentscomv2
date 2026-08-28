@@ -4,7 +4,8 @@ import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { Pool } from 'pg'
 import { resetTestDb } from '@aptv2/db/test-helpers'
 import { ProcessedUnitDataSchema } from '@aptv2/schema'
-import { parseEntrataPayload, type SourceRow } from '@aptv2/scrapers'
+import { parseEntrataPayload, sha256Json, type SourceRow } from '@aptv2/scrapers'
+import * as scrapersModule from '@aptv2/scrapers'
 import { createHaikuEnricher, extractSnapshot } from '../src/extract'
 
 const payload = JSON.parse(
@@ -20,6 +21,28 @@ const embeddedHtml = readFileSync(
 const embeddedPayload = JSON.parse(
   (embeddedHtml.match(/<script[^>]*id="jd-fp-data-script-app"[^>]*>([\s\S]*?)<\/script>/) ?? ['', ''])[1]!,
 )
+const embeddedV2Html = readFileSync(
+  fileURLToPath(new URL('../../scrapers/fixtures/entrata-embedded-v2.html', import.meta.url)),
+  'utf8',
+)
+function decodeV2Entities(s: string): string {
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+}
+const embeddedV2Payload = JSON.parse(decodeV2Entities(embeddedV2Html.match(/:floor_plans='([^']*)'/)![1]!))
+
+const rentpressHtml = readFileSync(
+  fileURLToPath(new URL('../../scrapers/fixtures/entrata-rentpress.html', import.meta.url)),
+  'utf8',
+)
+const rentpressPayload = JSON.parse(decodeV2Entities(rentpressHtml.match(/data-floorplans='([^']*)'/)![1]!))
 
 const NOW = new Date('2026-08-27T12:00:00.000Z')
 const SOURCE: SourceRow = {
@@ -44,6 +67,28 @@ const EMBEDDED_SOURCE: SourceRow = {
   },
   robots_policy: null, rate_limit_rps: 1,
 }
+const APERTURE_SOURCE: SourceRow = {
+  id: 3, platform: 'entrata', name: 'Aperture Fixture', website_url: 'https://apertureorlando.com',
+  endpoint_config: {
+    endpoint_url: 'https://apertureorlando.com/floor-plans/',
+    property: {
+      name: 'Aperture Fixture', address_line1: '12727 E Colonial Dr', city: 'Orlando',
+      state: 'FL', zip: '32826', latitude: 28.565, longitude: -81.189,
+    },
+  },
+  robots_policy: null, rate_limit_rps: 1,
+}
+const KNIGHTSBRIDGE_SOURCE: SourceRow = {
+  id: 4, platform: 'entrata', name: 'Knightsbridge Fixture', website_url: 'https://www.liveatknightsbridge.com',
+  endpoint_config: {
+    endpoint_url: 'https://www.liveatknightsbridge.com/floor-plans/',
+    property: {
+      name: 'Knightsbridge Fixture', address_line1: '2802 Cheval St', city: 'Orlando',
+      state: 'FL', zip: '32828', latitude: 28.514, longitude: -81.178,
+    },
+  },
+  robots_policy: null, rate_limit_rps: 1,
+}
 
 let pool: Pool
 beforeAll(async () => {
@@ -57,6 +102,14 @@ beforeAll(async () => {
     `INSERT INTO sources (platform, name, website_url) VALUES ('entrata', 'Society Fixture', 'https://societyorlando.com') RETURNING id`,
   )
   EMBEDDED_SOURCE.id = rows2[0].id
+  const { rows: rows3 } = await pool.query(
+    `INSERT INTO sources (platform, name, website_url) VALUES ('entrata', 'Aperture Fixture', 'https://apertureorlando.com') RETURNING id`,
+  )
+  APERTURE_SOURCE.id = rows3[0].id
+  const { rows: rows4 } = await pool.query(
+    `INSERT INTO sources (platform, name, website_url) VALUES ('entrata', 'Knightsbridge Fixture', 'https://www.liveatknightsbridge.com') RETURNING id`,
+  )
+  KNIGHTSBRIDGE_SOURCE.id = rows4[0].id
 })
 afterAll(async () => {
   await pool.end()
@@ -129,6 +182,39 @@ describe('extractSnapshot', () => {
     expect(failures).toEqual([])
     expect(units.length).toBe(137)
     expect(units[0]!.image_url).toBeNull()
+  })
+
+  it('produces 11 schema-valid records from the v2 embedded-shape fixture (Aperture), absolute source_urls', async () => {
+    const { units, failures } = await extractSnapshot(pool, {
+      snapshot: { id: 60, source_id: APERTURE_SOURCE.id, payload: embeddedV2Payload },
+      source: APERTURE_SOURCE, now: NOW, llm: null,
+    })
+    expect(failures).toEqual([])
+    expect(units.length).toBe(11)
+    for (const u of units) {
+      ProcessedUnitDataSchema.parse(u)
+      expect(u.source_url.startsWith('https://apertureorlando.com/')).toBe(true)
+      expect(u.platform).toBe('entrata')
+    }
+  })
+
+  // CRITICAL regression coverage: the rentpress shape's unit_available_on
+  // arrives as "M/D/YYYY" ("8/6/2026"), not ISO — before the normalization
+  // shim, every one of these 37 units failed ProcessedUnitDataSchema's
+  // `available_on: z.string().date()`.
+  it('produces 37 schema-valid records from the rentpress embedded-shape fixture (Knightsbridge), absolute source_urls', async () => {
+    const { units, failures } = await extractSnapshot(pool, {
+      snapshot: { id: 70, source_id: KNIGHTSBRIDGE_SOURCE.id, payload: rentpressPayload },
+      source: KNIGHTSBRIDGE_SOURCE, now: NOW, llm: null,
+    })
+    expect(failures).toEqual([])
+    expect(units.length).toBe(37)
+    for (const u of units) {
+      ProcessedUnitDataSchema.parse(u)
+      expect(u.source_url.startsWith('https://www.liveatknightsbridge.com/')).toBe(true)
+      expect(u.platform).toBe('entrata')
+      expect(u.available_on).toMatch(/^\d{4}-\d{2}-\d{2}$/) // normalized to ISO, not the source's "M/D/YYYY"
+    }
   })
 
   it('applies LLM enrichment when the enricher returns values, and caches by content hash', async () => {
@@ -216,6 +302,83 @@ describe('extractSnapshot', () => {
     })
     expect(failures).toEqual([])
     expect(units[8]!.pets_allowed).toBe('not_mentioned')
+  })
+})
+
+describe('extractSnapshot: cache batch-fetch path', () => {
+  it('a pre-existing cache row is honored via a single content_hash = ANY($1) prefetch, identically to the per-unit lookup', async () => {
+    const rawUnits = parseEntrataPayload(payload, SOURCE.endpoint_config.endpoint_url)
+    const withTextIndex = rawUnits.findIndex((u) => u.amenityTexts.length + u.marketingTexts.length > 0)
+    expect(withTextIndex).toBeGreaterThanOrEqual(0)
+    const texts = [...rawUnits[withTextIndex]!.amenityTexts, ...rawUnits[withTextIndex]!.marketingTexts]
+    const preCachedHash = sha256Json({ texts, v: 2 })
+    const preCached = {
+      pets_allowed: 'allowed' as const, concession_text: null, concession: null,
+      furnished: null, short_term_ok: null, summary: 'pre-cached',
+    }
+    const cacheStore = new Map<string, unknown>([[preCachedHash, preCached]])
+    const enricherCalls: string[][] = []
+    const enricher = async (calledTexts: string[]) => {
+      enricherCalls.push(calledTexts)
+      return {
+        pets_allowed: 'not_allowed' as const, concession_text: null, concession: null,
+        furnished: null, short_term_ok: null, summary: 'fresh',
+      }
+    }
+    // A minimal fake pool that only understands a batched ANY($1) prefetch
+    // and the per-miss insert — any other query shape (e.g. a per-unit
+    // `content_hash = $1` lookup) fails the test, forcing the batch design.
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        if (/content_hash = ANY\(\$1\)/.test(sql)) {
+          const hashes = params![0] as string[]
+          const rows = hashes.filter((h) => cacheStore.has(h)).map((h) => ({ content_hash: h, extracted: cacheStore.get(h) }))
+          return { rows }
+        }
+        if (/INSERT INTO extract_cache/.test(sql)) {
+          const [hash, json] = params as [string, string]
+          if (!cacheStore.has(hash)) cacheStore.set(hash, JSON.parse(json))
+          return { rows: [] }
+        }
+        throw new Error(`extractSnapshot must batch-fetch extract_cache via one ANY($1) query; got: ${sql}`)
+      },
+    }
+    const { units, failures } = await extractSnapshot(fakePool as unknown as Pool, {
+      snapshot: { id: 99, source_id: SOURCE.id, payload }, source: SOURCE, now: NOW, llm: enricher,
+    })
+    expect(failures).toEqual([])
+    const preCachedUnit = units[withTextIndex]!
+    expect(preCachedUnit.pets_allowed).toBe('allowed') // served from the pre-seeded cache row, not the enricher
+    expect(enricherCalls.some((t) => sha256Json({ texts: t, v: 2 }) === preCachedHash)).toBe(false)
+  })
+
+  it('a malformed unit (its hash computation throws) is a counted failure, not a whole-snapshot crash (review Important 5)', async () => {
+    const rawUnits = parseEntrataPayload(payload, SOURCE.endpoint_config.endpoint_url)
+    const targetIndex = rawUnits.findIndex((u) => u.amenityTexts.length + u.marketingTexts.length > 0)
+    expect(targetIndex).toBeGreaterThanOrEqual(0)
+    const targetTexts = [...rawUnits[targetIndex]!.amenityTexts, ...rawUnits[targetIndex]!.marketingTexts]
+    const realSha256Json = scrapersModule.sha256Json
+    const spy = vi.spyOn(scrapersModule, 'sha256Json').mockImplementation((value: unknown) => {
+      const v = value as { texts?: unknown[] }
+      const isTarget =
+        Array.isArray(v?.texts) && v.texts.length === targetTexts.length && v.texts.every((t, i) => t === targetTexts[i])
+      if (isTarget) throw new Error('boom: malformed unit')
+      return realSha256Json(value)
+    })
+    try {
+      const { units, failures } = await extractSnapshot(pool, {
+        snapshot: { id: 100, source_id: SOURCE.id, payload }, source: SOURCE, now: NOW, llm: null,
+      })
+      // The ONE unit whose hash computation throws is counted as a failure
+      // (like any other per-unit extraction error) — every OTHER unit in
+      // the same snapshot still extracts, proving the failure didn't take
+      // down the whole snapshot.
+      expect(failures.length).toBe(1)
+      expect(failures[0]!.error).toMatch(/boom: malformed unit/)
+      expect(units.length).toBe(rawUnits.length - 1)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

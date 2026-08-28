@@ -13,7 +13,7 @@ function parseSourceLabel(parsed: ParsedQuery): string {
 }
 
 function chips(parsed: ParsedQuery): string[] {
-  const out: string[] = [...parsed.neighborhoods];
+  const out: string[] = [...parsed.neighborhoods, ...parsed.cities];
   if (parsed.priceMax !== null) out.push(`Under ${formatPrice(parsed.priceMax)}`);
   if (parsed.bedsMin !== null) {
     // Exact when both bounds agree ("1 bedroom" → "1 bd"); open-ended
@@ -26,6 +26,13 @@ function chips(parsed: ParsedQuery): string[] {
   if (parsed.furnished === false) out.push("Unfurnished");
   if (parsed.shortTerm) out.push("Short term OK");
   out.push(...parsed.amenities);
+  // Ordering intent is understanding too — show it, else "cheapest" feels
+  // like it vanished (it did, before sort semantics existed).
+  if (parsed.sort === "price_asc") out.push("Sorted by price ↑");
+  else if (parsed.sort === "price_desc") out.push("Sorted by price ↓");
+  else if (parsed.sort === "newest") out.push("Newest first");
+  else if (parsed.sort === "sqft_asc") out.push("Smallest first");
+  else if (parsed.sort === "sqft_desc") out.push("Biggest first");
   if (parsed.residualText) out.push(`“${parsed.residualText}” as keywords`);
   return out;
 }

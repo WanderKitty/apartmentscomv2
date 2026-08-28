@@ -193,6 +193,34 @@ describe('postgres SearchService', () => {
     expect(r.listings[0]!.score.textRelevance).toBeGreaterThan(0)
   })
 
+  it('carries listing coordinates for the map view', async () => {
+    const r = await service().search('')
+    expect(r.listings.length).toBeGreaterThan(0)
+    for (const l of r.listings) {
+      // Seed corpus is all Orlando: every coordinate lands in the metro box.
+      expect(l.lat).toBeGreaterThan(28.3)
+      expect(l.lat).toBeLessThan(28.8)
+      expect(l.lng).toBeGreaterThan(-81.6)
+      expect(l.lng).toBeLessThan(-81.1)
+    }
+    const detail = await service().getListing('seed___u0001')
+    expect(detail!.lat).not.toBeNull()
+    expect(detail!.lng).not.toBeNull()
+  })
+
+  it('returns the searched neighborhood boundary as GeoJSON, and none otherwise', async () => {
+    const r = await service().search('2br near Lake Eola')
+    expect(r.parsed.neighborhoods).toEqual(['Lake Eola Heights'])
+    expect(r.neighborhoodBoundaries).toHaveLength(1)
+    const b = r.neighborhoodBoundaries[0]!
+    expect(b.name).toBe('Lake Eola Heights')
+    expect(b.geojson.type).toBe('MultiPolygon')
+    expect(Array.isArray(b.geojson.coordinates)).toBe(true)
+
+    const plain = await service().search('1 bed')
+    expect(plain.neighborhoodBoundaries).toEqual([])
+  })
+
   // Last: inserts an extra listing, which would otherwise shift the
   // corpus/totalCount assertions the earlier tests depend on.
   it('surfaces the unit image_url as photoUrl in search and getListing', async () => {
@@ -299,5 +327,194 @@ describe('postgres SearchService', () => {
     expect(l!.trueCost!.advertisedMonthly).toBe(1500)
     expect(l!.trueCost!.concessionMonthly).toBe(200)
     expect(l!.trueCost!.netEffectiveMonthly).toBe(1300)
+  })
+
+  it('city filter matches a Tampa listing, excludes Orlando, and combines with beds', async () => {
+    const tampa2Bed = ProcessedUnitDataSchema.parse({
+      ...minimalUnit(),
+      source_id: `entrata${SOURCE_ID_SEPARATOR}tampa-2bed-test`,
+      platform: 'entrata',
+      collapse_key: 'entrata:tampa-2bed-test',
+      liberal_dedup_cluster: 'tampa:tampa-2bed-test-unit',
+      source_url: 'https://example.com/tampa-2bed-test',
+      data_provenance: 'scraped',
+      property_name: 'Tampa Test Property',
+      address_line1: '1 Tampa Test Way',
+      city: 'Tampa', state: 'FL', zip: '33602',
+      neighborhood: '',
+      latitude: 27.9506, longitude: -82.4572,
+      beds: 2, baths: 2,
+      advertised_rent_cents: 180000,
+      price_level: 'unit', is_price_transparent: true,
+      first_seen_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(),
+    })
+    const tampa1Bed = ProcessedUnitDataSchema.parse({
+      ...minimalUnit(),
+      source_id: `entrata${SOURCE_ID_SEPARATOR}tampa-1bed-test`,
+      platform: 'entrata',
+      collapse_key: 'entrata:tampa-1bed-test',
+      liberal_dedup_cluster: 'tampa:tampa-1bed-test-unit',
+      source_url: 'https://example.com/tampa-1bed-test',
+      data_provenance: 'scraped',
+      property_name: 'Tampa Test Property',
+      address_line1: '1 Tampa Test Way',
+      city: 'Tampa', state: 'FL', zip: '33602',
+      neighborhood: '',
+      latitude: 27.9506, longitude: -82.4572,
+      beds: 1, baths: 1,
+      advertised_rent_cents: 150000,
+      price_level: 'unit', is_price_transparent: true,
+      first_seen_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(),
+    })
+    await upsertProcessedUnits(pool, [tampa2Bed, tampa1Bed])
+
+    const r = await service().search('2br in tampa')
+    expect(r.parsed.cities).toEqual(['Tampa'])
+    expect(r.parsed.neighborhoods).toEqual([])
+    expect(r.totalCount).toBeGreaterThanOrEqual(1)
+    for (const l of r.listings) {
+      expect(l.address).toMatch(/Tampa/)
+      expect(l.beds).toBe(2) // combines with the exact-bed hard filter
+      expect(l.city).toBe('Tampa') // city threaded through the Row mapper (Plan 6 Task 4)
+    }
+    expect(r.listings.some((l) => l.propertyName === 'Tampa Test Property' && l.beds === 2)).toBe(true)
+    expect(r.listings.some((l) => l.beds === 1)).toBe(false) // Tampa 1bd excluded by beds
+    expect(r.listings.every((l) => !l.address.includes('Orlando'))).toBe(true)
+  })
+
+  // Pinned emergent behavior (reviewer-traced, accepted as-is): a keyword
+  // parse can populate BOTH neighborhoods and cities at once (e.g. "lake
+  // eola orlando" — see keyword-parse.test.ts). No real listing is both in
+  // the Lake Eola Heights neighborhood AND the city of Tampa, so this
+  // combination zeroes out and exercises the relaxation-hint path: BOTH
+  // filters are offered as independent drops, and each drop's rebuilt
+  // suggestion keeps whichever of {neighborhood, city} it did NOT strip —
+  // rebuildQuery's neighborhood-priority branch means the city drop's
+  // suggestion echoes the neighborhood and vice versa; the two never
+  // co-occur in a single suggestedQuery.
+  it('offers both neighborhood and city as independent relaxation drops when both are set, with neighborhood-priority reconstruction', async () => {
+    const p: ParsedQuery = {
+      ...parseQueryKeywords(''),
+      neighborhoods: ['Lake Eola Heights'],
+      cities: ['Tampa'],
+    }
+    const svc = createSearchService(() => pool, { parse: async () => p })
+    const r = await svc.search('lake eola orlando tampa')
+    expect(r.totalCount).toBe(0)
+    expect(r.relaxationHints).toHaveLength(2)
+
+    const dropNeighborhood = r.relaxationHints.find((h) => h.drop === 'neighborhoods')!
+    expect(dropNeighborhood).toBeDefined()
+    expect(dropNeighborhood.count).toBeGreaterThan(0)
+    expect(dropNeighborhood.suggestedQuery).toBe('in Tampa') // city survives once neighborhood is stripped
+
+    const dropCity = r.relaxationHints.find((h) => h.drop === 'city')!
+    expect(dropCity).toBeDefined()
+    expect(dropCity.label).toBe('Tampa')
+    expect(dropCity.count).toBeGreaterThan(0)
+    expect(dropCity.suggestedQuery).toBe('in Lake Eola Heights') // neighborhood priority: city never echoed here
+  })
+})
+
+describe('sort semantics ("cheapest"/"smallest" are orderings, not filters)', () => {
+  it('"cheapest" alone returns the corpus in ascending price order, undisclosed last, no FTS gate', async () => {
+    const r = await service().search('cheapest')
+    expect(r.parsed.sort).toBe('price_asc')
+    expect(r.parsed.priceMax).toBeNull()
+    expect(r.parsed.residualText).toBe('')
+    expect(r.parsed.failedOpen).toBe(false)
+    expect(r.totalCount).toBeGreaterThan(5)
+    const prices = r.listings.map((l) => l.price)
+    const priced = prices.filter((p): p is number => p !== null)
+    expect(priced).toEqual([...priced].sort((a, b) => a - b))
+    expect(prices[prices.length - 1]).toBeNull() // undisclosed still last
+    expect(r.listings[0]!.price).toBe(Math.min(...priced))
+  })
+
+  it('"cheapest 2br" keeps the exact-beds filter AND the price ordering', async () => {
+    const r = await service().search('cheapest 2br')
+    expect(r.parsed.sort).toBe('price_asc')
+    expect(r.parsed.bedsMin).toBe(2)
+    for (const l of r.listings) expect(l.beds).toBe(2)
+    const priced = r.listings.map((l) => l.price).filter((p): p is number => p !== null)
+    expect(priced).toEqual([...priced].sort((a, b) => a - b))
+  })
+
+  it('"most expensive" sorts descending', async () => {
+    const r = await service().search('most expensive')
+    expect(r.parsed.sort).toBe('price_desc')
+    const priced = r.listings.map((l) => l.price).filter((p): p is number => p !== null)
+    expect(priced).toEqual([...priced].sort((a, b) => b - a))
+  })
+
+  it('"newest" sorts by first-listed date, newest first (undisclosed price still last)', async () => {
+    const r = await service().search('newest')
+    expect(r.parsed.sort).toBe('newest')
+    // The standing rule — undisclosed price sorts last — outranks every
+    // sort key, newest included: newest-descending within the priced set.
+    const priced = r.listings.filter((l) => l.price !== null)
+    const dates = priced.map((l) => Date.parse(l.firstListedAt))
+    expect(dates).toEqual([...dates].sort((a, b) => b - a))
+    const last = r.listings[r.listings.length - 1]!
+    if (r.listings.some((l) => l.price === null)) expect(last.price).toBeNull()
+  })
+
+  it('"smallest"/"biggest" sort by square footage; unknown sqft sorts last', async () => {
+    // A priced unit with NO sqft — unknown size must never win "smallest".
+    const noSqftUnit = ProcessedUnitDataSchema.parse({
+      ...minimalUnit(),
+      source_id: `entrata${SOURCE_ID_SEPARATOR}no-sqft-test`,
+      platform: 'entrata',
+      collapse_key: 'entrata:no-sqft-test',
+      liberal_dedup_cluster: 'orlando:no-sqft-test-unit',
+      source_url: 'https://example.com/no-sqft-test',
+      data_provenance: 'scraped',
+      property_name: 'No Sqft Fixture',
+      address_line1: '1 No Sqft Way',
+      city: 'Orlando', state: 'FL', zip: '32801',
+      neighborhood: 'Lake Eola Heights',
+      latitude: 28.5462, longitude: -81.3708,
+      beds: 1, baths: 1,
+      sqft: null, is_sqft_not_mentioned: true,
+      advertised_rent_cents: 150000,
+      price_level: 'unit', is_price_transparent: true,
+      first_seen_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(),
+    })
+    await upsertProcessedUnits(pool, [noSqftUnit])
+
+    const small = await service().search('smallest')
+    expect(small.parsed.sort).toBe('sqft_asc')
+    // Unknown size is last among the PRICED set (never first); undisclosed
+    // price still outranks everything as the standing last-place rule.
+    // (Two unknown-size fixtures exist by now — No Sqft above and the
+    // Special-rate unit — so assert on the PROPERTY, not one named unit.)
+    const pricedIdx = small.listings.map((l, i) => ({ l, i })).filter((x) => x.l.price !== null)
+    const firstUnknownSize = pricedIdx.find((x) => x.l.sqft === null)
+    expect(firstUnknownSize).toBeDefined()
+    for (const x of pricedIdx) if (x.i > firstUnknownSize!.i) expect(x.l.sqft).toBeNull()
+    for (const after of small.listings.slice(pricedIdx[pricedIdx.length - 1]!.i + 1)) {
+      expect(after.price).toBeNull()
+    }
+    const known = pricedIdx.filter((x) => x.l.sqft !== null).map((x) => x.l.sqft as number)
+    expect(known).toEqual([...known].sort((a, b) => a - b))
+
+    const big = await service().search('biggest')
+    expect(big.parsed.sort).toBe('sqft_desc')
+    const bigPricedIdx = big.listings.map((l, i) => ({ l, i })).filter((x) => x.l.price !== null)
+    const bigFirstUnknown = bigPricedIdx.find((x) => x.l.sqft === null)
+    expect(bigFirstUnknown).toBeDefined()
+    for (const x of bigPricedIdx) if (x.i > bigFirstUnknown!.i) expect(x.l.sqft).toBeNull()
+    for (const after of big.listings.slice(bigPricedIdx[bigPricedIdx.length - 1]!.i + 1)) {
+      expect(after.price).toBeNull()
+    }
+    const bigKnown = bigPricedIdx.filter((x) => x.l.sqft !== null).map((x) => x.l.sqft as number)
+    expect(bigKnown).toEqual([...bigKnown].sort((a, b) => b - a))
+  })
+
+  it('text affinity ranks parsed queries: the canonical query top result has positive textRelevance', async () => {
+    const r = await service().search(
+      'pet friendly 2br under $2400 near Lake Eola with in-unit laundry',
+    )
+    expect(r.listings[0]!.score.textRelevance).toBeGreaterThan(0)
   })
 })

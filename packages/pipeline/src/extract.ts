@@ -53,22 +53,44 @@ export async function extractSnapshot(
   // (common in the embedded shape) must not fan out duplicate LLM calls when
   // processed concurrently.
   const inflightByHash = new Map<string, Promise<LlmEnrichment | null>>()
+  // `prefetched` is assigned below, after the batched cache lookup completes
+  // and before any worker starts calling this closure.
+  let prefetched = new Map<string, LlmEnrichment | null>()
   const enrichmentFor = (hash: string, texts: string[]): Promise<LlmEnrichment | null> => {
     let p = inflightByHash.get(hash)
     if (!p) {
-      p = cachedEnrichment(pool, hash, args.llm ?? null, texts)
+      p = cachedEnrichment(pool, hash, args.llm ?? null, texts, prefetched)
       inflightByHash.set(hash, p)
     }
     return p
   }
+
+  // Best-effort hash list for the batch prefetch ONLY — keyed on the
+  // enrichment INPUTS only (not the whole raw unit) so a rent/availability
+  // change doesn't bust an LLM result that's still valid. A unit whose hash
+  // can't be computed here is simply left out of the prefetch: the per-unit
+  // try below recomputes it and is where such a failure is actually caught
+  // and counted, so a single malformed unit can never crash the whole
+  // snapshot (review Important 5).
+  const prefetchHashes: string[] = []
+  for (const ru of parsed) {
+    try {
+      prefetchHashes.push(sha256Json({ texts: [...ru.amenityTexts, ...ru.marketingTexts], v: 2 }))
+    } catch {
+      // swallowed here — the per-unit try below will hit (and count) this same failure
+    }
+  }
+  // Scale fix: one batched lookup for the whole snapshot instead of a
+  // per-unit round trip — a large snapshot could otherwise issue hundreds
+  // of individual cache SELECTs. Feeds enrichmentFor (the concurrency
+  // wrapper) so both lineages' wins survive this merge.
+  prefetched = await fetchCachedEnrichments(pool, prefetchHashes)
 
   const buildUnit = async (i: number) => {
     const ru = parsed[i]!
     try {
       const externalId = `${slug(prop.name)}-${slug(ru.externalId)}`
       const texts = [...ru.amenityTexts, ...ru.marketingTexts]
-      // Keyed on the enrichment INPUTS only (not the whole raw unit) so a
-      // rent/availability change doesn't bust an LLM result that's still valid.
       const unitHash = sha256Json({ texts, v: 2 })
       const enrichment = await enrichmentFor(unitHash, texts)
       // Guard (prod incident 2026-08-28): a concession without a positive
@@ -105,7 +127,7 @@ export async function extractSnapshot(
         city: prop.city,
         state: prop.state,
         zip: prop.zip,
-        neighborhood: '', // resolved spatially at upsert (Task 5 amendment)
+        neighborhood: '', // resolved spatially at upsert
         latitude: prop.latitude,
         longitude: prop.longitude,
         unit_number: ru.unitNumber,
@@ -178,16 +200,29 @@ export async function extractSnapshot(
   return { units: slots.filter((u): u is ProcessedUnitData => u !== null), failures }
 }
 
+/** One batched lookup for every unit hash in the snapshot (write path stays per-unit — see `cachedEnrichment`). */
+async function fetchCachedEnrichments(pool: pg.Pool, hashes: string[]): Promise<Map<string, LlmEnrichment | null>> {
+  const cached = new Map<string, LlmEnrichment | null>()
+  if (hashes.length === 0) return cached
+  const { rows } = await pool.query(
+    `SELECT content_hash, extracted FROM extract_cache WHERE content_hash = ANY($1)`,
+    [hashes],
+  )
+  for (const row of rows) cached.set(row.content_hash, row.extracted as LlmEnrichment | null)
+  return cached
+}
+
 async function cachedEnrichment(
   pool: pg.Pool,
   hash: string,
   llm: LlmEnricher | null,
   texts: string[],
+  cached: Map<string, LlmEnrichment | null>,
 ): Promise<LlmEnrichment | null> {
-  const { rows } = await pool.query(`SELECT extracted FROM extract_cache WHERE content_hash = $1`, [hash])
   // A stored JSON `null` (from a prior "nothing to extract" result) is
-  // still a row — this is a cache HIT returning null, not a miss.
-  if (rows[0]) return rows[0].extracted as LlmEnrichment | null
+  // still a HIT — `.has` (not truthiness of the value) distinguishes it
+  // from a genuine miss.
+  if (cached.has(hash)) return cached.get(hash) ?? null
   if (!llm || texts.every((t) => !t.trim())) return null
   try {
     const out = await llm(texts)
@@ -198,6 +233,9 @@ async function cachedEnrichment(
        ON CONFLICT (content_hash) DO NOTHING`,
       [hash, JSON.stringify(out ?? null)],
     )
+    // Two units in the SAME snapshot can share a hash (identical texts) —
+    // record it locally so the second one doesn't re-call the LLM.
+    cached.set(hash, out)
     return out
   } catch {
     return null // fail-open by design: enrichment degrades, the listing still lands
