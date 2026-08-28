@@ -13,6 +13,11 @@ const embeddedHtml = readFileSync(
   'utf8',
 )
 
+const embeddedV2Html = readFileSync(
+  fileURLToPath(new URL('../fixtures/entrata-embedded-v2.html', import.meta.url)),
+  'utf8',
+)
+
 const SOURCE: SourceRow = {
   id: 7,
   platform: 'entrata',
@@ -122,6 +127,65 @@ describe('parseEntrataPayload (golden, embedded shape — Society Orlando captur
   })
 })
 
+describe('parseEntrataPayload (golden, embedded v2 shape — Aperture capture)', () => {
+  // Same convention as the v1 embedded block above: re-derive the payload
+  // from the raw HTML the way entrataAdapter.fetch's extractEmbeddedJson
+  // does internally (that function isn't exported), so this test exercises
+  // the real entity-encoded attribute + decode, not a pre-cleaned fixture.
+  const V2_EMBEDDED_ATTR_RE = /:floor_plans='([^']*)'/
+  function decodeHtmlEntities(s: string): string {
+    return s
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#0?39;|&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+  }
+  const v2Payload = JSON.parse(decodeHtmlEntities(embeddedV2Html.match(V2_EMBEDDED_ATTR_RE)![1]!))
+  const APERTURE_ENDPOINT = 'https://apertureorlando.com/floor-plans/'
+  const units = parseEntrataPayload(v2Payload, APERTURE_ENDPOINT)
+
+  it('parses all 11 floorplans with sane fields, distinct external ids', () => {
+    expect(units.length).toBe(11)
+    for (const u of units) {
+      expect(u.externalId).toBeTruthy()
+      expect(u.beds).toBeGreaterThanOrEqual(0)
+      expect(u.baths).toBeGreaterThanOrEqual(1)
+      expect(u.rentCents === null || u.rentCents > 30000).toBe(true)
+      expect(u.unitNumber).toBeNull() // per-floorplan granularity, not per physical unit
+    }
+    expect(new Set(units.map((u) => u.externalId)).size).toBe(units.length)
+  })
+
+  it('maps a known floorplan (post_id 2678, "2BR/2BA – B1") faithfully', () => {
+    const unit = units.find((u) => u.externalId === '2678')!
+    expect(unit.floorplanName).toBe('2BR/2BA – B1') // en dash, double-escaped in the raw HTML
+    expect(unit.beds).toBe(2)
+    expect(unit.baths).toBe(2)
+    expect(unit.sqft).toBe(834)
+    expect(unit.rentCents).toBe(137900) // $1379 -> cents
+    expect(unit.rentSpecialCents).toBeNull() // no distinct discounted-rate field on this shape
+    expect(unit.availableOn).toBe('2026-01-23')
+    expect(unit.marketingTexts).toEqual(['PLUS TWO MONTHS FREE'])
+    expect(unit.detailUrl).toBe('https://apertureorlando.com/floorplan/2br-2ba-b1/')
+  })
+
+  it('a sold-out floorplan with an empty first_available_date array maps to a null availableOn', () => {
+    const unit = units.find((u) => u.externalId === '2684')!
+    expect(unit.floorplanName).toBe('Studio – S1')
+    expect(unit.beds).toBe(0)
+    expect(unit.availableOn).toBeNull() // first_available_date is [] (not a string) when sold out
+    expect(unit.marketingTexts).toEqual([]) // current_special_text is "" when sold out
+  })
+
+  it('throws a named error when a required field is missing', () => {
+    expect(() => parseEntrataPayload([{ post_id: 1, title: 'No beds here' }])).toThrow(EntrataPayloadError)
+  })
+})
+
 describe('entrataAdapter', () => {
   it('fetches text through the injected fetcher; JSON body parses directly (REST shape), verbatim + hashed', async () => {
     const fetcher: PoliteFetcher = {
@@ -151,6 +215,30 @@ describe('entrataAdapter', () => {
     const units = parseEntrataPayload(snap.payload)
     expect(units.length).toBe(137)
     expect(snap.content_hash).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('extracts the v2 embedded JSON when the body has the :floor_plans attribute, not the v1 script tag', async () => {
+    const fetcher: PoliteFetcher = {
+      fetchJson: async () => {
+        throw new Error('fetchJson should not be called by entrataAdapter')
+      },
+      fetchText: async () => ({ status: 200, body: embeddedV2Html }),
+    }
+    const snap = await entrataAdapter.fetch(SOURCE, fetcher)
+    const units = parseEntrataPayload(snap.payload)
+    expect(units.length).toBe(11)
+    expect(snap.content_hash).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('throws a named error listing both embedded patterns when neither is found in HTML', async () => {
+    const fetcher: PoliteFetcher = {
+      fetchJson: async () => {
+        throw new Error('unused')
+      },
+      fetchText: async () => ({ status: 200, body: '<html><body>no floorplan data here</body></html>' }),
+    }
+    await expect(entrataAdapter.fetch(SOURCE, fetcher)).rejects.toThrow(/jd-fp-data-script-app/)
+    await expect(entrataAdapter.fetch(SOURCE, fetcher)).rejects.toThrow(/floor_plans/)
   })
 
   it('throws on a non-200 response', async () => {

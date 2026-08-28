@@ -26,11 +26,11 @@ describe('sources seed', () => {
     }
   })
 
-  it('marks embedded-variant sources (not yet parsed) as disabled, REST/known-embedded sources as enabled', () => {
+  it('marks the still-unhandled embedded variant (Knightsbridge) as disabled, all others enabled', () => {
     const byName = Object.fromEntries(SOURCES_SEED.map((s) => [s.name, s.enabled]))
     expect(byName['Current Orlando']).toBe(true)
     expect(byName['Society Orlando']).toBe(true)
-    expect(byName['Aperture']).toBe(false)
+    expect(byName['Aperture']).toBe(true)
     expect(byName['Knightsbridge at Stoneybrook']).toBe(false)
   })
 
@@ -42,7 +42,7 @@ describe('sources seed', () => {
     expect(rows.length).toBe(SOURCES_SEED.length)
     const byName = Object.fromEntries(rows.map((r) => [r.name, r.enabled]))
     expect(byName['Current Orlando']).toBe(true)
-    expect(byName['Aperture']).toBe(false)
+    expect(byName['Aperture']).toBe(true)
     expect(byName['Knightsbridge at Stoneybrook']).toBe(false)
   })
 
