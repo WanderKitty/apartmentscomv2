@@ -67,6 +67,21 @@ describe('parseSpherexxPayload', () => {
     expect(u.marketingTexts.some((t) => t.includes('mandatory fees'))).toBe(true)
     expect(() => parseSpherexxPayload('nonsense')).toThrow(/spherexx/)
   })
+
+  it('treats a zero price as undisclosed, never $0 — including stored payloads on reprocess', () => {
+    // Spherexx emits data-min-price="0" as its no-current-pricing sentinel;
+    // prod snapshots captured before this fix carry minPriceDollars: 0, so
+    // the guard must live at the parse (payload → unit) stage.
+    const zeroCard = {
+      fp: '99001', name: 'The Sentinel', beds: 2, baths: 2,
+      minPriceDollars: 0, maxPriceDollars: 0, basePriceDollars: 0,
+      feeTotalDollars: 37.5, sqft: 1000, unitsAvailable: 1,
+      pricedOn: '20260828', detailPath: null,
+    }
+    const [u] = parseSpherexxPayload([zeroCard])
+    expect(u!.rentCents).toBeNull()
+    expect(u!.marketingTexts.join(' ')).not.toMatch(/\$0[^\d]/)
+  })
 })
 
 describe('spherexxAdapter', () => {
