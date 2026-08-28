@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Pool } from 'pg'
 import { resetTestDb } from '@aptv2/db/test-helpers'
-import { buildSeedUnits, type ParsedQuery } from '@aptv2/schema'
+import { buildSeedUnits, minimalUnit, ProcessedUnitDataSchema, SOURCE_ID_SEPARATOR, type ParsedQuery } from '@aptv2/schema'
 import { seedNeighborhoods, upsertProcessedUnits } from '@aptv2/pipeline'
 import { createSearchService } from '../src/index'
 import { parseQueryKeywords } from '../src/keyword-parse'
@@ -144,5 +144,41 @@ describe('postgres SearchService', () => {
     expect(r.totalCount).toBe(2)
     for (const l of r.listings) expect(l.propertyName).toBe('The Vue Downtown')
     expect(r.listings[0]!.score.textRelevance).toBeGreaterThan(0)
+  })
+
+  // Last: inserts an extra listing, which would otherwise shift the
+  // corpus/totalCount assertions the earlier tests depend on.
+  it('labels a net-effective discount without a structured concession as "Special rate"', async () => {
+    const specialRateUnit = ProcessedUnitDataSchema.parse({
+      ...minimalUnit(),
+      source_id: `entrata${SOURCE_ID_SEPARATOR}special-rate-test`,
+      platform: 'entrata',
+      collapse_key: 'entrata:special-rate-test',
+      liberal_dedup_cluster: 'orlando:special-rate-test-unit',
+      source_url: 'https://example.com/special-rate-test',
+      data_provenance: 'scraped',
+      property_name: 'Special Rate Fixture',
+      address_line1: '1 Special Rate Way',
+      city: 'Orlando', state: 'FL', zip: '32801',
+      neighborhood: 'Lake Eola Heights',
+      latitude: 28.5462, longitude: -81.3708,
+      beds: 1, baths: 1,
+      advertised_rent_cents: 150000,
+      price_level: 'unit', is_price_transparent: true,
+      // Deterministic "special rate" fact (no LLM-parsed concession record):
+      // net_effective_monthly_cents set, concession jsonb stays null.
+      net_effective_monthly_cents: 130000,
+      concession_type: 'other',
+      concession_text_raw: 'Special rate $1300/mo (advertised $1500/mo)',
+      first_seen_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(),
+    })
+    await upsertProcessedUnits(pool, [specialRateUnit])
+    const l = await service().getListing('entrata___special-rate-test')
+    expect(l).not.toBeNull()
+    expect(l!.trueCost).not.toBeNull()
+    expect(l!.trueCost!.concessionLabel).toBe('Special rate')
+    expect(l!.trueCost!.advertisedMonthly).toBe(1500)
+    expect(l!.trueCost!.concessionMonthly).toBe(200)
+    expect(l!.trueCost!.netEffectiveMonthly).toBe(1300)
   })
 })

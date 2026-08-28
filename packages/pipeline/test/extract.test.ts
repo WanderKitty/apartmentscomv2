@@ -5,7 +5,7 @@ import { Pool } from 'pg'
 import { resetTestDb } from '@aptv2/db/test-helpers'
 import { ProcessedUnitDataSchema } from '@aptv2/schema'
 import type { SourceRow } from '@aptv2/scrapers'
-import { extractSnapshot } from '../src/extract'
+import { createHaikuEnricher, extractSnapshot } from '../src/extract'
 
 const payload = JSON.parse(
   readFileSync(
@@ -13,6 +13,14 @@ const payload = JSON.parse(
     'utf8',
   ),
 )
+const embeddedHtml = readFileSync(
+  fileURLToPath(new URL('../../scrapers/fixtures/entrata-embedded.html', import.meta.url)),
+  'utf8',
+)
+const embeddedPayload = JSON.parse(
+  (embeddedHtml.match(/<script[^>]*id="jd-fp-data-script-app"[^>]*>([\s\S]*?)<\/script>/) ?? ['', ''])[1]!,
+)
+
 const NOW = new Date('2026-08-27T12:00:00.000Z')
 const SOURCE: SourceRow = {
   id: 1, platform: 'entrata', name: 'Fixture Community', website_url: 'https://example.com',
@@ -21,6 +29,17 @@ const SOURCE: SourceRow = {
     property: {
       name: 'Fixture Community', address_line1: '1 Fixture St', city: 'Orlando',
       state: 'FL', zip: '32801', latitude: 28.54, longitude: -81.38,
+    },
+  },
+  robots_policy: null, rate_limit_rps: 1,
+}
+const EMBEDDED_SOURCE: SourceRow = {
+  id: 2, platform: 'entrata', name: 'Society Fixture', website_url: 'https://societyorlando.com',
+  endpoint_config: {
+    endpoint_url: 'https://societyorlando.com/floorplans/',
+    property: {
+      name: 'Society Fixture', address_line1: '410 N Orange Ave', city: 'Orlando',
+      state: 'FL', zip: '32801', latitude: 28.548, longitude: -81.379,
     },
   },
   robots_policy: null, rate_limit_rps: 1,
@@ -34,6 +53,10 @@ beforeAll(async () => {
     `INSERT INTO sources (platform, name, website_url) VALUES ('entrata', 'Fixture Community', 'https://example.com') RETURNING id`,
   )
   SOURCE.id = rows[0].id
+  const { rows: rows2 } = await pool.query(
+    `INSERT INTO sources (platform, name, website_url) VALUES ('entrata', 'Society Fixture', 'https://societyorlando.com') RETURNING id`,
+  )
+  EMBEDDED_SOURCE.id = rows2[0].id
 })
 afterAll(async () => {
   await pool.end()
@@ -58,12 +81,34 @@ describe('extractSnapshot', () => {
     }
   })
 
+  // CRITICAL regression coverage: the embedded shape's `permalink` is
+  // site-relative — before the fix, every one of these 137 units failed
+  // ProcessedUnitDataSchema's `source_url: z.string().url()`.
+  it('produces 137 schema-valid records from the embedded-shape fixture (regression: relative permalink must resolve, not fail schema)', async () => {
+    const { units, failures } = await extractSnapshot(pool, {
+      snapshot: { id: 50, source_id: EMBEDDED_SOURCE.id, payload: embeddedPayload },
+      source: EMBEDDED_SOURCE, now: NOW, llm: null,
+    })
+    expect(failures).toEqual([])
+    expect(units.length).toBe(137)
+    for (const u of units) {
+      ProcessedUnitDataSchema.parse(u)
+      expect(u.source_url.startsWith('https://societyorlando.com/')).toBe(true)
+      expect(u.platform).toBe('entrata')
+    }
+  })
+
   it('applies LLM enrichment when the enricher returns values, and caches by content hash', async () => {
-    // units[8] (floorplan ID 2133, "The Two") is the fixture unit that
-    // carries free text (`banner: "Limited Availability"`) — the fixture's
-    // FIRST unit ("The Studio") has no banner/disclaimer/description text,
-    // so the enrichment-skip-when-no-free-text rule would skip it (per
-    // the brief's fixture-content caveat), retargeting here instead.
+    // units[12] (floorplan ID 2139, "The Three Balcony") is the fixture
+    // unit that carries free text (banner "Limited Availability" + tags)
+    // AND has no `rentspecial` of its own — the fixture's FIRST unit
+    // ("The Studio") has no banner/disclaimer/description text, so the
+    // enrichment-skip-when-no-free-text rule would skip it (per the
+    // brief's fixture-content caveat); most of the other free-text-bearing
+    // floorplans (e.g. "The Two", units[8]) also carry a discounted
+    // special rate, which now deterministically wins as concession_type
+    // "other" (see the dedicated special-rate test below) and would mask
+    // the LLM-derived concession this test means to exercise.
     const enricher = vi.fn(async () => ({
       pets_allowed: 'allowed' as const,
       concession_text: '1 month free on 12-month leases',
@@ -76,8 +121,8 @@ describe('extractSnapshot', () => {
       snapshot: { id: 2, source_id: SOURCE.id, payload },
       source: SOURCE, now: NOW, llm: enricher,
     })
-    const enriched = first.units[8]!
-    expect(enriched.source_id).toMatch(/2133$|the-two$/)
+    const enriched = first.units[12]!
+    expect(enriched.source_id).toMatch(/2139$/)
     expect(enriched.pets_allowed).toBe('allowed')
     expect(enriched.concession_type).toBe('free_months')
     expect(enriched.net_effective_monthly_cents).not.toBeNull()
@@ -92,6 +137,43 @@ describe('extractSnapshot', () => {
     expect(enricher.mock.calls.length).toBe(callsAfterFirst)
   })
 
+  it('maps a discounted "special" rate deterministically as concession_type "other" (floorplan ID 2141, "The Four")', async () => {
+    await pool.query('DELETE FROM extract_cache')
+    const { units, failures } = await extractSnapshot(pool, {
+      snapshot: { id: 5, source_id: SOURCE.id, payload },
+      source: SOURCE, now: NOW, llm: null,
+    })
+    expect(failures).toEqual([])
+    const theFour = units[13]! // 14th floorplan record: ID 2141, rent $1150 / special $850
+    expect(theFour.source_id).toMatch(/2141$/)
+    expect(theFour.advertised_rent_cents).toBe(115000) // unchanged — the advertised (base) rent
+    expect(theFour.net_effective_monthly_cents).toBe(85000) // the special rate
+    expect(theFour.concession_type).toBe('other')
+    expect(theFour.concession_text_raw).toBe('Special rate $850/mo (advertised $1150/mo)')
+  })
+
+  it('caches a legitimately-null enrichment result too, so the LLM is not re-sent the same text', async () => {
+    await pool.query('DELETE FROM extract_cache')
+    const nullEnricher = vi.fn(async () => null)
+    const first = await extractSnapshot(pool, {
+      snapshot: { id: 6, source_id: SOURCE.id, payload },
+      source: SOURCE, now: NOW, llm: nullEnricher,
+    })
+    expect(first.failures).toEqual([])
+    const callsAfterFirst = nullEnricher.mock.calls.length
+    expect(callsAfterFirst).toBeGreaterThanOrEqual(1) // floorplans 8-14 all carry some free text (banner/tags)
+    // Confirm the cached rows really are a stored JSON null, not absent.
+    const { rows } = await pool.query(`SELECT extracted FROM extract_cache`)
+    expect(rows.length).toBe(callsAfterFirst)
+    for (const row of rows) expect(row.extracted).toBeNull()
+
+    await extractSnapshot(pool, {
+      snapshot: { id: 7, source_id: SOURCE.id, payload },
+      source: SOURCE, now: NOW, llm: nullEnricher,
+    })
+    expect(nullEnricher.mock.calls.length).toBe(callsAfterFirst) // second run: all cache HITs, no new calls
+  })
+
   it('a throwing enricher degrades to not_mentioned instead of failing the unit', async () => {
     await pool.query('DELETE FROM extract_cache')
     const { units, failures } = await extractSnapshot(pool, {
@@ -101,5 +183,17 @@ describe('extractSnapshot', () => {
     })
     expect(failures).toEqual([])
     expect(units[8]!.pets_allowed).toBe('not_mentioned')
+  })
+})
+
+describe('createHaikuEnricher', () => {
+  it('returns null without ANTHROPIC_API_KEY', () => {
+    const saved = process.env.ANTHROPIC_API_KEY
+    delete process.env.ANTHROPIC_API_KEY
+    try {
+      expect(createHaikuEnricher()).toBeNull()
+    } finally {
+      if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved
+    }
   })
 })

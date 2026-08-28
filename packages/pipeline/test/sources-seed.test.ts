@@ -26,11 +26,23 @@ describe('sources seed', () => {
     }
   })
 
-  it('seeds idempotently by website_url', async () => {
+  it('marks embedded-variant sources (not yet parsed) as disabled, REST/known-embedded sources as enabled', () => {
+    const byName = Object.fromEntries(SOURCES_SEED.map((s) => [s.name, s.enabled]))
+    expect(byName['Current Orlando']).toBe(true)
+    expect(byName['Society Orlando']).toBe(true)
+    expect(byName['Aperture']).toBe(false)
+    expect(byName['Knightsbridge at Stoneybrook']).toBe(false)
+  })
+
+  it('seeds idempotently by website_url, including the enabled flag', async () => {
     const first = await seedSources(pool)
     expect(first).toBe(SOURCES_SEED.length)
     await seedSources(pool)
-    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM sources`)
-    expect(rows[0].n).toBe(SOURCES_SEED.length)
+    const { rows } = await pool.query(`SELECT name, enabled FROM sources ORDER BY name`)
+    expect(rows.length).toBe(SOURCES_SEED.length)
+    const byName = Object.fromEntries(rows.map((r) => [r.name, r.enabled]))
+    expect(byName['Current Orlando']).toBe(true)
+    expect(byName['Aperture']).toBe(false)
+    expect(byName['Knightsbridge at Stoneybrook']).toBe(false)
   })
 })

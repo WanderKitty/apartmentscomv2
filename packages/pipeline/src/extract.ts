@@ -39,7 +39,10 @@ export async function extractSnapshot(
   },
 ): Promise<{ units: ProcessedUnitData[]; failures: Array<{ externalId: string; error: string }> }> {
   const { snapshot, source, now } = args
-  const parsed = parseEntrataPayload(snapshot.payload) // shape error here fails the whole snapshot — correct: nothing is trustworthy
+  // baseUrl absolutizes any site-relative detail-page path the payload
+  // carries (e.g. the embedded shape's permalink) — required so
+  // `source_url` below is always a valid absolute URL for the schema.
+  const parsed = parseEntrataPayload(snapshot.payload, source.endpoint_config.endpoint_url) // shape error here fails the whole snapshot — correct: nothing is trustworthy
   const prop = source.endpoint_config.property
   const nowIso = now.toISOString()
   const units: ProcessedUnitData[] = []
@@ -48,12 +51,21 @@ export async function extractSnapshot(
   for (const ru of parsed) {
     try {
       const externalId = `${slug(prop.name)}-${slug(ru.externalId)}`
-      const unitHash = sha256Json({ u: ru, v: 1 })
-      const enrichment = await cachedEnrichment(pool, unitHash, args.llm ?? null, [
-        ...ru.amenityTexts,
-        ...ru.marketingTexts,
-      ])
+      const texts = [...ru.amenityTexts, ...ru.marketingTexts]
+      // Keyed on the enrichment INPUTS only (not the whole raw unit) so a
+      // rent/availability change doesn't bust an LLM result that's still valid.
+      const unitHash = sha256Json({ texts, v: 2 })
+      const enrichment = await cachedEnrichment(pool, unitHash, args.llm ?? null, texts)
       const concession = enrichment?.concession ?? null
+      // Deterministic (no LLM): a stated lower "special" rate is a fact,
+      // not an interpretation — takes priority over any LLM-derived concession.
+      const specialRate =
+        ru.rentSpecialCents !== null && ru.rentCents !== null && ru.rentSpecialCents < ru.rentCents
+          ? {
+              cents: ru.rentSpecialCents,
+              text: `Special rate $${Math.round(ru.rentSpecialCents / 100)}/mo (advertised $${Math.round(ru.rentCents / 100)}/mo)`,
+            }
+          : null
       const base = minimalUnit()
       const record: ProcessedUnitData = ProcessedUnitDataSchema.parse({
         ...base,
@@ -90,20 +102,22 @@ export async function extractSnapshot(
               rent_daily_cents: Math.round((ru.rentCents * 12) / 365),
             }
           : {}),
-        concession_type: concession ? concession.kind : enrichment ? 'none' : 'not_mentioned',
-        concession_text_raw: enrichment?.concession_text ?? null,
-        ...(concession && ru.rentCents !== null
-          ? {
-              net_effective_monthly_cents: netEffectiveMonthlyCents({
-                advertisedCents: ru.rentCents,
-                concession,
-              }),
-              concession_applies_lease_months: concession.leaseMonths,
-              ...(concession.kind === 'free_weeks' ? { concession_free_weeks: concession.weeks } : {}),
-              ...(concession.kind === 'free_months' ? { concession_free_months: concession.months } : {}),
-              ...(concession.kind === 'flat_discount' ? { concession_value_cents: concession.valueCents } : {}),
-            }
-          : {}),
+        concession_type: specialRate ? 'other' : concession ? concession.kind : enrichment ? 'none' : 'not_mentioned',
+        concession_text_raw: specialRate?.text ?? enrichment?.concession_text ?? null,
+        ...(specialRate
+          ? { net_effective_monthly_cents: specialRate.cents }
+          : concession && ru.rentCents !== null
+            ? {
+                net_effective_monthly_cents: netEffectiveMonthlyCents({
+                  advertisedCents: ru.rentCents,
+                  concession,
+                }),
+                concession_applies_lease_months: concession.leaseMonths,
+                ...(concession.kind === 'free_weeks' ? { concession_free_weeks: concession.weeks } : {}),
+                ...(concession.kind === 'free_months' ? { concession_free_months: concession.months } : {}),
+                ...(concession.kind === 'flat_discount' ? { concession_value_cents: concession.valueCents } : {}),
+              }
+            : {}),
         pets_allowed: enrichment?.pets_allowed ?? 'not_mentioned',
         furnished: enrichment?.furnished ?? 'not_mentioned',
         short_term_ok: enrichment?.short_term_ok ?? null,
@@ -132,17 +146,19 @@ async function cachedEnrichment(
   texts: string[],
 ): Promise<LlmEnrichment | null> {
   const { rows } = await pool.query(`SELECT extracted FROM extract_cache WHERE content_hash = $1`, [hash])
-  if (rows[0]) return rows[0].extracted as LlmEnrichment
+  // A stored JSON `null` (from a prior "nothing to extract" result) is
+  // still a row — this is a cache HIT returning null, not a miss.
+  if (rows[0]) return rows[0].extracted as LlmEnrichment | null
   if (!llm || texts.every((t) => !t.trim())) return null
   try {
     const out = await llm(texts)
-    if (out) {
-      await pool.query(
-        `INSERT INTO extract_cache (content_hash, extracted) VALUES ($1, $2)
-         ON CONFLICT (content_hash) DO NOTHING`,
-        [hash, JSON.stringify(out)],
-      )
-    }
+    // Cache the result whether or not it's null, so a known-nothing unit
+    // isn't re-sent to the LLM on every run.
+    await pool.query(
+      `INSERT INTO extract_cache (content_hash, extracted) VALUES ($1, $2)
+       ON CONFLICT (content_hash) DO NOTHING`,
+      [hash, JSON.stringify(out ?? null)],
+    )
     return out
   } catch {
     return null // fail-open by design: enrichment degrades, the listing still lands
@@ -179,18 +195,30 @@ const LlmEnrichmentSchema = z.object({
 const SYSTEM =
   'Extract ONLY facts stated in these apartment listing texts; null for anything not stated. Never guess.'
 
+const ENRICH_TIMEOUT_MS = 10_000
+
 /** Returns null without ANTHROPIC_API_KEY (fail-open at construction, same as the caller's fail-open per call). */
 export function createHaikuEnricher(): LlmEnricher | null {
   if (!process.env.ANTHROPIC_API_KEY) return null
   const client = new Anthropic()
   return async (texts: string[]): Promise<LlmEnrichment | null> => {
-    const response = await client.messages.parse({
-      model: 'claude-haiku-4-5',
-      max_tokens: 1024,
-      system: SYSTEM,
-      messages: [{ role: 'user', content: texts.join('\n') }],
-      output_config: { format: zodOutputFormat(LlmEnrichmentSchema) },
-    })
-    return response.parsed_output ?? null
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const response = await Promise.race([
+        client.messages.parse({
+          model: 'claude-haiku-4-5',
+          max_tokens: 1024,
+          system: SYSTEM,
+          messages: [{ role: 'user', content: texts.join('\n') }],
+          output_config: { format: zodOutputFormat(LlmEnrichmentSchema) },
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('enrich-timeout')), ENRICH_TIMEOUT_MS)
+        }),
+      ])
+      return response.parsed_output ?? null
+    } finally {
+      if (timer) clearTimeout(timer) // never leave the race's timer live
+    }
   }
 }

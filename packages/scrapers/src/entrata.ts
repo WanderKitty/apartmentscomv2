@@ -17,6 +17,8 @@ export type EntrataUnit = {
   baths: number
   sqft: number | null
   rentCents: number | null
+  /** A lower, currently-advertised "special" rate, when the source states one distinct from the base rent. */
+  rentSpecialCents: number | null
   availableOn: string | null
   amenityTexts: string[]
   marketingTexts: string[]
@@ -26,6 +28,8 @@ export type EntrataUnit = {
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => v !== null && typeof v === 'object'
 const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.trim() !== ''
+
+const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 
 function toNumberOrNull(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v
@@ -41,15 +45,31 @@ function dollarsToCents(v: unknown): number | null {
   return n === null ? null : Math.round(n * 100)
 }
 
+/** Absolutizes a site-relative path/URL against `baseUrl` (an absolute-path
+ * reference, e.g. "/foo/", resolves against the base's origin regardless of
+ * the base's own path). Falls back to the raw value when there's no base
+ * to resolve against, or the base itself isn't a valid URL. */
+function resolveUrl(pathOrUrl: string | null, baseUrl: string | undefined): string | null {
+  if (pathOrUrl === null) return null
+  if (!baseUrl) return pathOrUrl
+  try {
+    return new URL(pathOrUrl, baseUrl).toString()
+  } catch {
+    return pathOrUrl
+  }
+}
+
 // ---------------------------------------------------------------------
 // Shape 1 (REST): Current Orlando's standalone JSON endpoint returns an
 // array of lease-term groups; each group's `bedrooms` is an array of
 // arrays of floorplan records. No per-unit granularity — beds/baths/
 // sqft/rent are per FLOORPLAN, not per physical unit (unitNumber is
-// always null for this shape).
+// always null for this shape). Floorplan `ID`s are only unique WITHIN a
+// lease-term group, so externalId is namespaced with the group's slug
+// (e.g. "annual-2127") to avoid collisions across groups.
 // ---------------------------------------------------------------------
 
-function mapFloorplanRecord(fp: unknown, path: string): EntrataUnit {
+function mapFloorplanRecord(fp: unknown, path: string, groupSlug: string, baseUrl: string | undefined): EntrataUnit {
   if (!isObj(fp)) throw new EntrataPayloadError(`floorplan record at ${path} is not an object`)
 
   const idRaw = fp.ID
@@ -63,27 +83,30 @@ function mapFloorplanRecord(fp: unknown, path: string): EntrataUnit {
 
   const termRent = Array.isArray(fp.term_rent) ? (fp.term_rent as Obj[]) : []
   const first = termRent[0]
-  // Base asking rent (not the discounted "special" rate, if any — the
-  // special number alone has no explanatory text and belongs to a later
-  // enrichment step, not this pure mapping).
   const rentCents = first ? dollarsToCents(first.rent) : null
+  const rentSpecialCents = first ? dollarsToCents(first.rentspecial) : null
 
   const tags = Array.isArray(fp.tags) ? (fp.tags as Obj[]) : []
   const marketingTexts = [fp.banner, fp.disclaimer, fp.description, ...termRent.map((t) => t.message), ...tags.map((t) => t.name)].filter(
     isNonEmptyString,
   )
 
-  const featuredImage = isObj(fp.featured_image) ? fp.featured_image : null
-  const detailUrl = featuredImage && isNonEmptyString(featuredImage.link) ? featuredImage.link : null
+  // The floorplan's own page (not featured_image.link, which is the
+  // attachment/image page): observed in this fixture as
+  // https://www.currentorlando.com/local-floor-plans/{fp.slug}/ — the
+  // same "local-floor-plans/{slug}" segment featured_image.link uses as
+  // its own path prefix before the attachment-specific slug.
+  const detailUrl = isNonEmptyString(fp.slug) ? resolveUrl(`/local-floor-plans/${fp.slug}/`, baseUrl) : null
 
   return {
-    externalId: String(idRaw),
+    externalId: `${groupSlug}-${String(idRaw)}`,
     floorplanName: isNonEmptyString(fp.name) ? fp.name : null,
     unitNumber: null,
     beds,
     baths,
     sqft: toNumberOrNull(fp.squarefeet_min),
     rentCents,
+    rentSpecialCents,
     availableOn: null, // this endpoint carries no availability date
     amenityTexts: [], // no amenity-attribute field on this endpoint
     marketingTexts,
@@ -91,30 +114,36 @@ function mapFloorplanRecord(fp: unknown, path: string): EntrataUnit {
   }
 }
 
-function parseFloorplanGroupsShape(groups: unknown[]): EntrataUnit[] {
+function parseFloorplanGroupsShape(groups: unknown[], baseUrl: string | undefined): EntrataUnit[] {
   const units: EntrataUnit[] = []
   groups.forEach((group, gi) => {
     if (!isObj(group)) throw new EntrataPayloadError(`lease-term group at [${gi}] is not an object`)
     const bedroomGroups = group.bedrooms
     if (!Array.isArray(bedroomGroups)) throw new EntrataPayloadError(`missing bedrooms array at [${gi}]`)
+    const groupSlug = isNonEmptyString(group.name) ? slugify(group.name) : `group${gi}`
     bedroomGroups.forEach((fpList, bi) => {
       if (!Array.isArray(fpList)) throw new EntrataPayloadError(`bedrooms[${bi}] at group [${gi}] is not an array`)
-      fpList.forEach((fp, fi) => units.push(mapFloorplanRecord(fp, `[${gi}].bedrooms[${bi}][${fi}]`)))
+      fpList.forEach((fp, fi) => units.push(mapFloorplanRecord(fp, `[${gi}].bedrooms[${bi}][${fi}]`, groupSlug, baseUrl)))
     })
   })
   return units
 }
 
 // ---------------------------------------------------------------------
-// Shape 2 (embedded): Society Orlando, Aperture, and Knightsbridge embed
-// a `jd-fp-data-script-app` widget-config object in their floor-plans
-// HTML page. Unlike shape 1, this config carries a flat `units` array
-// with genuine per-unit granularity: apartment number, available date,
-// and a `.amenities[].name` free-text list (in this capture, used by the
-// property for marketing/specials copy rather than physical amenities).
+// Shape 2 (embedded): a `jd-fp-data-script-app` widget-config object
+// embedded in a floor-plans HTML page. Confirmed handled here: Society
+// Orlando's exact capture (`entrata-embedded.html`) — a flat `units`
+// array with genuine per-unit granularity (apartment number, available
+// date, a `.amenities[].name` free-text list). NOT handled (deferred):
+// Aperture's and Knightsbridge's embedded variant, which per the Task 3
+// report is a differently-shaped, HTML-entity-encoded array adjacent to
+// an `af3_entrata_options` config, not this `jd-fp-data-script-app`
+// script tag — a payload in that variant will not match
+// `EMBEDDED_JSON_RE` below and will throw. Those two sources are seeded
+// with `enabled: false` until a follow-up extractor is built for it.
 // ---------------------------------------------------------------------
 
-function mapUnitRecord(u: unknown, path: string): EntrataUnit {
+function mapUnitRecord(u: unknown, path: string, baseUrl: string | undefined): EntrataUnit {
   if (!isObj(u)) throw new EntrataPayloadError(`unit record at ${path} is not an object`)
 
   const idRaw = u.id_value ?? u.id
@@ -145,28 +174,34 @@ function mapUnitRecord(u: unknown, path: string): EntrataUnit {
     baths,
     sqft: toNumberOrNull(u.square_feet),
     rentCents,
+    rentSpecialCents: null, // this shape has no separate discounted-rate field distinct from price_entity's own range
     availableOn,
     amenityTexts: [], // no separate physical-amenity field distinct from the marketing list below
     marketingTexts,
-    detailUrl: isNonEmptyString(u.permalink) ? u.permalink : null,
+    detailUrl: resolveUrl(isNonEmptyString(u.permalink) ? u.permalink : null, baseUrl),
   }
 }
 
-function parseEmbeddedUnitsShape(payload: Obj): EntrataUnit[] {
+function parseEmbeddedUnitsShape(payload: Obj, baseUrl: string | undefined): EntrataUnit[] {
   const units = payload.units
   if (!Array.isArray(units)) throw new EntrataPayloadError('missing units array')
-  return units.map((u, i) => mapUnitRecord(u, `units[${i}]`))
+  return units.map((u, i) => mapUnitRecord(u, `units[${i}]`, baseUrl))
 }
 
 /**
  * Pure; no network. Dispatches on payload shape: an array of lease-term
  * groups (shape 1, REST) or an object with a `units` array (shape 2,
- * embedded widget config). Throws `EntrataPayloadError` naming the
- * missing field on an unrecognized or malformed payload.
+ * embedded widget config — Society Orlando's variant only, see the note
+ * above). Throws `EntrataPayloadError` naming the missing field on an
+ * unrecognized or malformed payload.
+ *
+ * `baseUrl` (typically the source's `endpoint_config.endpoint_url`) is
+ * used only to absolutize site-relative detail-page paths/URLs found in
+ * the payload; it never changes which fields are extracted.
  */
-export function parseEntrataPayload(payload: unknown): EntrataUnit[] {
-  if (Array.isArray(payload)) return parseFloorplanGroupsShape(payload)
-  if (isObj(payload) && Array.isArray(payload.units)) return parseEmbeddedUnitsShape(payload)
+export function parseEntrataPayload(payload: unknown, baseUrl?: string): EntrataUnit[] {
+  if (Array.isArray(payload)) return parseFloorplanGroupsShape(payload, baseUrl)
+  if (isObj(payload) && Array.isArray(payload.units)) return parseEmbeddedUnitsShape(payload, baseUrl)
   throw new EntrataPayloadError(
     'unrecognized payload shape (expected an array of lease-term groups, or an object with a units array)',
   )
