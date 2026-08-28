@@ -223,6 +223,34 @@ describe('postgres SearchService', () => {
     expect(card.photoUrl).toBe('https://example.com/floorplans/image-test.jpg')
   })
 
+  it('serves the listing coordinates for the map (search and getListing)', async () => {
+    // Reuses the Image Fixture row upserted above at 28.5461, -81.3707.
+    const l = await service().getListing('entrata___image-test')
+    expect(l!.latitude).toBeCloseTo(28.5461, 4)
+    expect(l!.longitude).toBeCloseTo(-81.3707, 4)
+    const r = await service().search('Image Fixture')
+    const card = r.listings.find((x) => x.propertyName === 'Image Fixture')!
+    expect(card.latitude).toBeCloseTo(28.5461, 4)
+    expect(card.longitude).toBeCloseTo(-81.3707, 4)
+  })
+
+  it('a row without a stored location serves null coordinates, not a crash', async () => {
+    // listings.location is nullable; no writer produces NULL today, so pin
+    // the read path directly.
+    await pool.query(`UPDATE listings SET location = NULL WHERE collapse_key = 'entrata:image-test'`)
+    try {
+      const l = await service().getListing('entrata___image-test')
+      expect(l).not.toBeNull()
+      expect(l!.latitude).toBeNull()
+      expect(l!.longitude).toBeNull()
+    } finally {
+      await pool.query(
+        `UPDATE listings SET location = ST_SetSRID(ST_MakePoint(-81.3707, 28.5461), 4326)::geography
+         WHERE collapse_key = 'entrata:image-test'`,
+      )
+    }
+  })
+
   it('labels a net-effective discount without a structured concession as "Special rate"', async () => {
     const specialRateUnit = ProcessedUnitDataSchema.parse({
       ...minimalUnit(),

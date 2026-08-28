@@ -41,6 +41,10 @@ export interface Listing {
   propertyName: string;
   neighborhood: string;
   address: string;
+  /** Null when the stored row has no location (listings.location is nullable);
+   * consumers must gate map UI on both being present. */
+  latitude: number | null;
+  longitude: number | null;
   beds: number; // 0 = studio
   baths: number;
   sqft: number | null;
