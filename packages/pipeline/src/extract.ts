@@ -9,6 +9,9 @@ import {
   netEffectiveMonthlyCents,
   type Concession,
   type ProcessedUnitData,
+  AMENITY_KEYWORDS,
+  COMMUNITY_AMENITIES,
+  UNIT_AMENITIES,
 } from '@aptv2/schema'
 import { parseEntrataPayload, parseSpherexxPayload, sha256Json, type SourceRow } from '@aptv2/scrapers'
 
@@ -28,6 +31,25 @@ export type LlmEnrichment = {
 export type LlmEnricher = (texts: string[]) => Promise<LlmEnrichment | null>
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+
+// Deterministic amenity-taxonomy pass: source amenity prose (vendor
+// strings like "Large sparkling pool with sundecks", schema.org
+// amenityFeature lists) is normalized onto the SAME closed vocabulary the
+// search filters query — without this, amenity filters are blind to every
+// scraped listing (the arrays stayed empty; the prose only fed summaries).
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const taxonomyHits = (texts: string[]): string[] => {
+  const hay = texts.join(' ').toLowerCase()
+  return Object.entries(AMENITY_KEYWORDS)
+    .filter(([, keywords]) => keywords.some((k) => new RegExp('\\b' + escapeRe(k) + '\\b').test(hay)))
+    .map(([name]) => name)
+}
+// Keyword hits route by the schema's own enums — 'balcony' and
+// 'in-unit laundry' are UNIT amenities; the rest are community.
+const splitAmenities = (hits: string[]): { unit_amenities: string[]; community_amenities: string[] } => ({
+  unit_amenities: hits.filter((h) => (UNIT_AMENITIES as readonly string[]).includes(h)),
+  community_amenities: hits.filter((h) => (COMMUNITY_AMENITIES as readonly string[]).includes(h)),
+})
 
 const ENRICH_CONCURRENCY = 5
 
@@ -166,6 +188,9 @@ export async function extractSnapshot(
                 ...(concession.kind === 'flat_discount' ? { concession_value_cents: concession.valueCents } : {}),
               }
             : {}),
+        // Amenities from source prose via the taxonomy pass — filterable,
+        // enum-routed (unit vs community), deterministic.
+        ...splitAmenities(taxonomyHits([...ru.amenityTexts, ...ru.marketingTexts])),
         pets_allowed: enrichment?.pets_allowed ?? 'not_mentioned',
         furnished: enrichment?.furnished ?? 'not_mentioned',
         short_term_ok: enrichment?.short_term_ok ?? null,

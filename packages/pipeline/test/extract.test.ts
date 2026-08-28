@@ -469,3 +469,44 @@ describe('enrichment concurrency', () => {
     expect(enricher.mock.calls.length).toBe(uniqueTexts.size)
   })
 })
+
+describe('spherexx: deterministic amenity taxonomy from source prose', () => {
+  it('maps vendor amenity strings and pets text onto the filter taxonomy', async () => {
+    const spherexxSource: SourceRow = {
+      id: 77, platform: 'spherexx', name: 'Taxonomy Fixture', website_url: 'https://example.com/tax',
+      endpoint_config: {
+        endpoint_url: 'https://example.com/tax/floorplans/',
+        mode: 'spherexx',
+        property: { name: 'Taxonomy Fixture', address_line1: '1 Tax Way', city: 'Orlando', state: 'FL', zip: '32801', latitude: 28.54, longitude: -81.38 },
+      },
+      robots_policy: null, rate_limit_rps: 1,
+    }
+    const { rows: src } = await pool.query(
+      `INSERT INTO sources (platform, name, website_url) VALUES ('spherexx','Taxonomy Fixture','https://example.com/tax') RETURNING id`,
+    )
+    spherexxSource.id = src[0]!.id
+    const payload = {
+      cards: [{
+        fp: '99001', name: 'Tax Plan', minPriceDollars: 1500, maxPriceDollars: 1600,
+        basePriceDollars: 1450, feeTotalDollars: 12.5, sqft: 700, beds: 1, baths: 1,
+        unitsAvailable: 2, pricedOn: '20260828', detailPath: '/floorplans/1bedroom/tax-plan/',
+        description: 'A lovely one bedroom with balcony access.',
+      }],
+      community: {
+        description: 'A wonderful community with everything you need.',
+        amenities: ['Large sparkling pool with sundecks', '24-Hour State-of-the-Art Fitness Center'],
+        petsAllowed: true,
+      },
+    }
+    const { units, failures } = await extractSnapshot(pool, {
+      snapshot: { id: 900, source_id: spherexxSource.id, payload },
+      source: spherexxSource, now: NOW, llm: null,
+    })
+    expect(failures).toEqual([])
+    const u = units[0]!
+    expect(u.community_amenities).toContain('pool')   // from "sparkling pool" prose
+    expect(u.community_amenities).toContain('gym')    // from "Fitness Center"? no — keyword is gym/fitness
+    expect(u.community_amenities).toContain('pet friendly') // from "Pets allowed"
+    expect(u.unit_amenities).toContain('balcony')   // unit-level, not community
+  })
+})
