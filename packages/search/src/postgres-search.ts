@@ -37,7 +37,7 @@ FROM (
     l.price_history, l.events, l.move_in_fees, l.concession, l.description,
     l.trust_score::float8 AS trust_score,
     u.beds::float8 AS beds, u.baths::float8 AS baths, u.sqft,
-    u.amenities AS unit_amenities,
+    u.amenities AS unit_amenities, u.image_url,
     p.name AS property_name, p.address_line1, p.city, p.state, p.zip,
     p.amenities AS community_amenities,
     n.name AS neighborhood_name,
@@ -87,7 +87,7 @@ SELECT
   l.price_history, l.events, l.move_in_fees, l.concession, l.description,
   l.trust_score::float8 AS trust_score,
   u.beds::float8 AS beds, u.baths::float8 AS baths, u.sqft,
-  u.amenities AS unit_amenities,
+  u.amenities AS unit_amenities, u.image_url,
   p.name AS property_name, p.address_line1, p.city, p.state, p.zip,
   p.amenities AS community_amenities,
   n.name AS neighborhood_name,
@@ -137,6 +137,7 @@ type Row = {
   baths: number
   sqft: number | null
   unit_amenities: string[]
+  image_url: string | null
   property_name: string
   address_line1: string
   city: string
@@ -201,7 +202,7 @@ function rowToListing(row: Row, now: Date): Listing {
     firstListedAt: row.first_listed_at.toISOString(),
     lastConfirmedAt: row.last_confirmed_at.toISOString(),
     priceHistory: row.price_history.map((e) => ({ at: e.at, from: d(e.from_cents), to: d(e.to_cents) })),
-    photoUrl: null,
+    photoUrl: row.image_url,
     sourceUrl: row.source_url,
     platform: row.source_platform,
     amenities: [...row.unit_amenities, ...row.community_amenities],

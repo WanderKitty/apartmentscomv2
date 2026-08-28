@@ -23,6 +23,19 @@ describe("ProcessedUnitDataSchema", () => {
     expect(() => ProcessedUnitDataSchema.parse(bad)).toThrow();
   });
 
+  it("carries an optional floorplan/unit image_url, defaulting to null", () => {
+    expect(ProcessedUnitDataSchema.parse(minimalUnit()).image_url).toBeNull();
+    const withImage = {
+      ...minimalUnit(),
+      image_url: "https://example.com/floorplan.jpg",
+    };
+    expect(ProcessedUnitDataSchema.parse(withImage).image_url).toBe(
+      "https://example.com/floorplan.jpg",
+    );
+    const bad = { ...minimalUnit(), image_url: "not-a-url" };
+    expect(() => ProcessedUnitDataSchema.parse(bad)).toThrow();
+  });
+
   it("field count is ~90 (93 as authored)", () => {
     const n = Object.keys(ProcessedUnitDataSchema.shape).length;
     expect(n).toBeGreaterThanOrEqual(60);

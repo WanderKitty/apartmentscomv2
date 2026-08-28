@@ -98,6 +98,25 @@ describe('extractSnapshot', () => {
     }
   })
 
+  it('maps the source image into image_url for both payload shapes', async () => {
+    const rest = await extractSnapshot(pool, {
+      snapshot: { id: 60, source_id: SOURCE.id, payload },
+      source: SOURCE, now: NOW, llm: null,
+    })
+    expect(rest.units[0]!.image_url).toBe(
+      'https://www.currentorlando.com/wp-content/uploads/2025/12/Current-Orlando-Floorplan-Unit-S1.jpg',
+    )
+    const embedded = await extractSnapshot(pool, {
+      snapshot: { id: 61, source_id: EMBEDDED_SOURCE.id, payload: embeddedPayload },
+      source: EMBEDDED_SOURCE, now: NOW, llm: null,
+    })
+    expect(embedded.failures).toEqual([]) // the "|" in the svg path must survive z.string().url()
+    const unit = embedded.units.find((u) => u.unit_number === '1822-B')!
+    expect(unit.image_url).toBe(
+      'https://societyorlando.com/assets/images/rent--by--bedroom|3-bed--d1_single1.svg',
+    )
+  })
+
   it('applies LLM enrichment when the enricher returns values, and caches by content hash', async () => {
     // units[12] (floorplan ID 2139, "The Three Balcony") is the fixture
     // unit that carries free text (banner "Limited Availability" + tags)

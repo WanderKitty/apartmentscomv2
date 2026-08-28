@@ -63,6 +63,29 @@ describe('upsertProcessedUnits', () => {
     expect(r.search_tsv).toContain('laundri')
   })
 
+  it('persists image_url on the unit row, and updates it on conflict', async () => {
+    const withImage = {
+      ...units[0]!,
+      image_url: 'https://example.com/floorplans/a1.jpg',
+    }
+    await upsertProcessedUnits(pool, [withImage])
+    const { rows } = await pool.query(
+      `SELECT u.image_url FROM listings l JOIN units u ON u.id = l.unit_id
+       WHERE l.collapse_key = $1`,
+      [withImage.collapse_key],
+    )
+    expect(rows[0].image_url).toBe('https://example.com/floorplans/a1.jpg')
+
+    // Conflict path: a later scrape with a new image replaces the old one.
+    await upsertProcessedUnits(pool, [{ ...withImage, image_url: 'https://example.com/floorplans/a1-v2.jpg' }])
+    const { rows: after } = await pool.query(
+      `SELECT u.image_url FROM listings l JOIN units u ON u.id = l.unit_id
+       WHERE l.collapse_key = $1`,
+      [withImage.collapse_key],
+    )
+    expect(after[0].image_url).toBe('https://example.com/floorplans/a1-v2.jpg')
+  })
+
   it('models the cross-platform pair as one unit, two listings, one cluster', async () => {
     const { rows } = await pool.query(
       `SELECT l.unit_id, l.dedup_cluster, l.source_platform, l.price_cents

@@ -131,6 +131,7 @@ export async function extractSnapshot(
         furnished: enrichment?.furnished ?? 'not_mentioned',
         short_term_ok: enrichment?.short_term_ok ?? null,
         generated_summary: enrichment?.summary ?? null,
+        image_url: ru.imageUrl,
         available_on: ru.availableOn,
         is_available_now: ru.availableOn !== null && ru.availableOn <= nowIso.slice(0, 10),
         first_seen_at: nowIso, // upsert keeps the earlier first_listed_at on conflict

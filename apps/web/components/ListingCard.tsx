@@ -33,9 +33,18 @@ export function ListingCard({
         className="group flex gap-4 rounded-card p-3 transition-shadow hover:shadow-tier"
       >
         <div className="relative flex size-28 shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-surface-strong sm:size-32">
-          <span className="px-2 text-center text-[8px] font-bold uppercase tracking-[0.32px] text-muted-soft">
-            Photo at source
-          </span>
+          {listing.photoUrl ? (
+            <img
+              src={listing.photoUrl}
+              alt={`${listing.propertyName} floorplan`}
+              loading="lazy"
+              className="size-full object-cover"
+            />
+          ) : (
+            <span className="px-2 text-center text-[8px] font-bold uppercase tracking-[0.32px] text-muted-soft">
+              Photo at source
+            </span>
+          )}
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col gap-1 py-1">

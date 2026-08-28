@@ -43,6 +43,19 @@ describe("ListingCard", () => {
     );
   });
 
+  it("renders the listing photo when photoUrl is set, placeholder otherwise", () => {
+    const withPhoto = {
+      ...byId("seed___u0001"),
+      photoUrl: "https://example.com/floorplans/a1.jpg",
+    };
+    const { rerender } = render(<ListingCard listing={withPhoto} now={NOW} />);
+    const img = screen.getByRole("img");
+    expect(img).toHaveAttribute("src", "https://example.com/floorplans/a1.jpg");
+
+    rerender(<ListingCard listing={byId("seed___u0001")} now={NOW} />);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
   it("hides score components unless debug is on", () => {
     const { rerender } = render(
       <ListingCard listing={byId("seed___u0001")} now={NOW} />,
