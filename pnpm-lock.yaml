@@ -83,6 +83,18 @@ importers:
       '@aptv2/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@aptv2/pipeline':
+        specifier: workspace:*
+        version: link:../../packages/pipeline
+      '@aptv2/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
+      '@aptv2/scrapers':
+        specifier: workspace:*
+        version: link:../../packages/scrapers
+      pg:
+        specifier: ^8.13.0
+        version: 8.23.0
       pg-boss:
         specifier: ^10.1.0
         version: 10.4.2
@@ -90,6 +102,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
