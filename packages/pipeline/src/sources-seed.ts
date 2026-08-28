@@ -64,8 +64,7 @@ export const SOURCES_SEED: Array<{
       },
     },
     rate_limit_rps: 1,
-    // embedded variant not yet parsed — follow-up extractor planned
-    enabled: false,
+    enabled: true,
   },
   {
     platform: 'entrata',
@@ -84,7 +83,11 @@ export const SOURCES_SEED: Array<{
       },
     },
     rate_limit_rps: 1,
-    // embedded variant not yet parsed — follow-up extractor planned
+    // Different embedded shape than Aperture's (confirmed re-enabled
+    // above): Knightsbridge's floor-plans page embeds its data as
+    // `<div id="rentpress-app" data-floorplans='[...]'>`, not the
+    // `:floor_plans=` attribute the v2 extractor handles — no extractor
+    // covers this shape yet.
     enabled: false,
   },
 ]

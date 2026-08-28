@@ -21,6 +21,22 @@ const embeddedHtml = readFileSync(
 const embeddedPayload = JSON.parse(
   (embeddedHtml.match(/<script[^>]*id="jd-fp-data-script-app"[^>]*>([\s\S]*?)<\/script>/) ?? ['', ''])[1]!,
 )
+const embeddedV2Html = readFileSync(
+  fileURLToPath(new URL('../../scrapers/fixtures/entrata-embedded-v2.html', import.meta.url)),
+  'utf8',
+)
+function decodeV2Entities(s: string): string {
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+}
+const embeddedV2Payload = JSON.parse(decodeV2Entities(embeddedV2Html.match(/:floor_plans='([^']*)'/)![1]!))
 
 const NOW = new Date('2026-08-27T12:00:00.000Z')
 const SOURCE: SourceRow = {
@@ -45,6 +61,17 @@ const EMBEDDED_SOURCE: SourceRow = {
   },
   robots_policy: null, rate_limit_rps: 1,
 }
+const APERTURE_SOURCE: SourceRow = {
+  id: 3, platform: 'entrata', name: 'Aperture Fixture', website_url: 'https://apertureorlando.com',
+  endpoint_config: {
+    endpoint_url: 'https://apertureorlando.com/floor-plans/',
+    property: {
+      name: 'Aperture Fixture', address_line1: '12727 E Colonial Dr', city: 'Orlando',
+      state: 'FL', zip: '32826', latitude: 28.565, longitude: -81.189,
+    },
+  },
+  robots_policy: null, rate_limit_rps: 1,
+}
 
 let pool: Pool
 beforeAll(async () => {
@@ -58,6 +85,10 @@ beforeAll(async () => {
     `INSERT INTO sources (platform, name, website_url) VALUES ('entrata', 'Society Fixture', 'https://societyorlando.com') RETURNING id`,
   )
   EMBEDDED_SOURCE.id = rows2[0].id
+  const { rows: rows3 } = await pool.query(
+    `INSERT INTO sources (platform, name, website_url) VALUES ('entrata', 'Aperture Fixture', 'https://apertureorlando.com') RETURNING id`,
+  )
+  APERTURE_SOURCE.id = rows3[0].id
 })
 afterAll(async () => {
   await pool.end()
@@ -95,6 +126,20 @@ describe('extractSnapshot', () => {
     for (const u of units) {
       ProcessedUnitDataSchema.parse(u)
       expect(u.source_url.startsWith('https://societyorlando.com/')).toBe(true)
+      expect(u.platform).toBe('entrata')
+    }
+  })
+
+  it('produces 11 schema-valid records from the v2 embedded-shape fixture (Aperture), absolute source_urls', async () => {
+    const { units, failures } = await extractSnapshot(pool, {
+      snapshot: { id: 60, source_id: APERTURE_SOURCE.id, payload: embeddedV2Payload },
+      source: APERTURE_SOURCE, now: NOW, llm: null,
+    })
+    expect(failures).toEqual([])
+    expect(units.length).toBe(11)
+    for (const u of units) {
+      ProcessedUnitDataSchema.parse(u)
+      expect(u.source_url.startsWith('https://apertureorlando.com/')).toBe(true)
       expect(u.platform).toBe('entrata')
     }
   })
