@@ -56,6 +56,12 @@ describe("ListingCard", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
+  it("shows exactly one New tag for a day-0 listing (photo tag, no meta chip)", () => {
+    const listing = { ...byId("seed___u0001"), daysOnMarket: 0 };
+    render(<ListingCard listing={listing} now={NOW} />);
+    expect(screen.getAllByText("New")).toHaveLength(1);
+  });
+
   it("hides score components unless debug is on", () => {
     const { rerender } = render(
       <ListingCard listing={byId("seed___u0001")} now={NOW} />,

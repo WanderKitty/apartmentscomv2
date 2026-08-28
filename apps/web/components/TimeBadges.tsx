@@ -3,15 +3,22 @@ import type { ListingEvent } from "@/lib/types";
 const fmtDay = (isoAt: string) =>
   new Date(isoAt).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
-export function timeBadgeLabels(events: ListingEvent[], daysOnMarket: number, now: Date): string[] {
+export function timeBadgeLabels(
+  events: ListingEvent[],
+  daysOnMarket: number,
+  now: Date,
+  opts: { showNew?: boolean } = {},
+): string[] {
   const out: string[] = [];
   const drops = events.filter((e) => e.kind === "price_drop" && e.fromCents !== null && e.toCents !== null);
   const lastDrop = drops[drops.length - 1];
   if (lastDrop) out.push(`↓$${Math.round((lastDrop.fromCents! - lastDrop.toCents!) / 100).toLocaleString("en-US")} on ${fmtDay(lastDrop.at)}`);
   // Day 0 = we just found it; a corpus-wide wall of "0 days on market"
   // reads like a bug, while "New" is the signal renters actually want.
-  if (daysOnMarket === 0) out.push("New");
-  else out.push(`${daysOnMarket} ${daysOnMarket === 1 ? "day" : "days"} on market`);
+  // Callers that float their own NEW tag over the photo pass showNew: false.
+  if (daysOnMarket === 0) {
+    if (opts.showNew !== false) out.push("New");
+  } else out.push(`${daysOnMarket} ${daysOnMarket === 1 ? "day" : "days"} on market`);
   const lastConcession = events.filter((e) => e.kind === "concession_added").pop();
   if (lastConcession && now.getTime() - new Date(lastConcession.at).getTime() < 7 * 86_400_000) {
     out.push("concession added this week");
@@ -19,10 +26,20 @@ export function timeBadgeLabels(events: ListingEvent[], daysOnMarket: number, no
   return out;
 }
 
-export function TimeBadges({ events, daysOnMarket, now }: { events: ListingEvent[]; daysOnMarket: number; now: Date }) {
+export function TimeBadges({
+  events,
+  daysOnMarket,
+  now,
+  showNew = true,
+}: {
+  events: ListingEvent[];
+  daysOnMarket: number;
+  now: Date;
+  showNew?: boolean;
+}) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      {timeBadgeLabels(events, daysOnMarket, now).map((label) => (
+      {timeBadgeLabels(events, daysOnMarket, now, { showNew }).map((label) => (
         <span
           key={label}
           className={
