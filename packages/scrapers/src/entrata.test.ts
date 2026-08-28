@@ -18,6 +18,11 @@ const embeddedV2Html = readFileSync(
   'utf8',
 )
 
+const rentpressHtml = readFileSync(
+  fileURLToPath(new URL('../fixtures/entrata-rentpress.html', import.meta.url)),
+  'utf8',
+)
+
 const SOURCE: SourceRow = {
   id: 7,
   platform: 'entrata',
@@ -186,6 +191,79 @@ describe('parseEntrataPayload (golden, embedded v2 shape — Aperture capture)',
   })
 })
 
+describe('parseEntrataPayload (golden, rentpress shape — Knightsbridge capture)', () => {
+  // Same convention as the v1/v2 embedded blocks above: re-derive the
+  // payload from the raw HTML the way entrataAdapter.fetch's
+  // extractEmbeddedJson does internally, so this exercises the real
+  // entity-encoded attribute + decode on a genuine pre-existing capture
+  // (see fixtures/README.md for provenance), not a pre-cleaned fixture.
+  const RENTPRESS_EMBEDDED_ATTR_RE = /data-floorplans='([^']*)'/
+  function decodeHtmlEntities(s: string): string {
+    return s
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#0?39;|&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+  }
+  const rentpressPayload = JSON.parse(decodeHtmlEntities(rentpressHtml.match(RENTPRESS_EMBEDDED_ATTR_RE)![1]!))
+  const KNIGHTSBRIDGE_ENDPOINT = 'https://www.liveatknightsbridge.com/floor-plans/'
+  const units = parseEntrataPayload(rentpressPayload, KNIGHTSBRIDGE_ENDPOINT)
+
+  it('flattens the nested per-floorplan units[] into 37 individual units with sane fields, distinct external ids', () => {
+    // 16 top-level floorplan records in the fixture, of which some (sold
+    // out / no physical units currently modeled) contribute an empty
+    // `units` array — 37 is the total across all of them, i.e. the
+    // observed UNIT count, not the floorplan count.
+    expect(units.length).toBe(37)
+    for (const u of units) {
+      expect(u.externalId).toBeTruthy()
+      expect(u.beds).toBeGreaterThanOrEqual(0)
+      expect(u.baths).toBeGreaterThanOrEqual(1)
+      expect(u.rentCents === null || u.rentCents > 30000).toBe(true)
+      expect(u.unitNumber).toBeTruthy() // genuine per-physical-unit granularity, unlike v2/v3
+    }
+    expect(new Set(units.map((u) => u.externalId)).size).toBe(units.length)
+  })
+
+  it('maps a known unit (unit_code 5676992_10, floorplan "A1 Renovated") faithfully', () => {
+    const unit = units.find((u) => u.externalId === '5676992_10')!
+    expect(unit.floorplanName).toBe('A1 Renovated')
+    expect(unit.unitNumber).toBe('103')
+    expect(unit.beds).toBe(1)
+    expect(unit.baths).toBe(1)
+    expect(unit.sqft).toBe(531)
+    expect(unit.rentCents).toBe(149300) // $1493 -> cents (unit_rent_effective)
+    expect(unit.rentSpecialCents).toBeNull() // no distinct discounted-rate field at unit level on this fixture
+    // Normalization shim: the source's "M/D/YYYY" ("8/6/2026") must become
+    // ISO "YYYY-MM-DD" — z.string().date() (schema) and extract.ts's
+    // string comparison against nowIso both require ISO, unlike v1/v2/v3
+    // which already receive ISO-ish dates from their sources.
+    expect(unit.availableOn).toBe('2026-08-06')
+    expect(unit.detailUrl).toBe('https://www.liveatknightsbridge.com/floorplans/a1-2/')
+  })
+
+  it('a floorplan with an empty units[] (no individual units currently modeled) contributes zero units, not a placeholder', () => {
+    const ids = units.map((u) => u.externalId)
+    // 5676992_A1C ("A1C") is the fixture's first floorplan record and has
+    // floorplan_available: "0" / units: [] — it must not appear at all.
+    expect(ids.some((id) => id.startsWith('969'))).toBe(false)
+  })
+
+  it('throws a named error when a required field is missing', () => {
+    expect(() =>
+      parseEntrataPayload([{ floorplan_code: 'x', units: [{ unit_name: 'No unit_code here', unit_bedrooms: '1', unit_bathrooms: '1' }] }]),
+    ).toThrow(EntrataPayloadError)
+  })
+
+  it('throws a named error when the floorplan record has no units array', () => {
+    expect(() => parseEntrataPayload([{ floorplan_code: 'x' }])).toThrow(EntrataPayloadError)
+  })
+})
+
 describe('entrataAdapter', () => {
   it('fetches text through the injected fetcher; JSON body parses directly (REST shape), verbatim + hashed', async () => {
     const fetcher: PoliteFetcher = {
@@ -230,7 +308,20 @@ describe('entrataAdapter', () => {
     expect(snap.content_hash).toMatch(/^[0-9a-f]{64}$/)
   })
 
-  it('throws a named error listing both embedded patterns when neither is found in HTML', async () => {
+  it('extracts the rentpress embedded JSON when the body has the data-floorplans attribute, not the v1 script tag or v2 :floor_plans attribute', async () => {
+    const fetcher: PoliteFetcher = {
+      fetchJson: async () => {
+        throw new Error('fetchJson should not be called by entrataAdapter')
+      },
+      fetchText: async () => ({ status: 200, body: rentpressHtml }),
+    }
+    const snap = await entrataAdapter.fetch(SOURCE, fetcher)
+    const units = parseEntrataPayload(snap.payload)
+    expect(units.length).toBe(37)
+    expect(snap.content_hash).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('throws a named error listing all three embedded patterns when none is found in HTML', async () => {
     const fetcher: PoliteFetcher = {
       fetchJson: async () => {
         throw new Error('unused')
@@ -239,6 +330,7 @@ describe('entrataAdapter', () => {
     }
     await expect(entrataAdapter.fetch(SOURCE, fetcher)).rejects.toThrow(/jd-fp-data-script-app/)
     await expect(entrataAdapter.fetch(SOURCE, fetcher)).rejects.toThrow(/floor_plans/)
+    await expect(entrataAdapter.fetch(SOURCE, fetcher)).rejects.toThrow(/data-floorplans/)
   })
 
   it('throws on a non-200 response', async () => {

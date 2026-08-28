@@ -3,7 +3,7 @@ import { fingerprintEntrata } from './fingerprint'
 
 // Snippets below are trimmed excerpts of the exact markers documented in
 // packages/scrapers/src/entrata.ts and packages/scrapers/fixtures/README.md
-// for the three known Entrata payload shapes:
+// for the four known Entrata payload shapes:
 //   - REST: Current Orlando's `/wp-json/entrata/v3/termrent-floor-plans`
 //     (entrata-availability.json's provenance). No homepage capture of
 //     Current Orlando exists in the repo (only the endpoint's own JSON
@@ -16,6 +16,9 @@ import { fingerprintEntrata } from './fingerprint'
 //     packages/scrapers/fixtures/entrata-embedded.html (Society Orlando).
 //   - embedded-v2: the `:floor_plans='...'` Vue attribute, trimmed from
 //     packages/scrapers/fixtures/entrata-embedded-v2.html (Aperture).
+//   - rentpress: the `rentpress-app`/`data-floorplans='...'` div attribute,
+//     trimmed from packages/scrapers/fixtures/entrata-rentpress.html
+//     (Knightsbridge — see fixtures/README.md for provenance).
 
 const REST_HINT_SNIPPET = `
 <script id="af3-entrata-js-extra">
@@ -31,6 +34,13 @@ const EMBEDDED_V1_SNIPPET = `
 const EMBEDDED_V2_SNIPPET = `
 <div id="app">
 <floor-plan-page-main-component inline-template :floor_plans='[{"post_id":2684,"title":"1BR\\/1BA","bedrooms":"1","bathrooms":"1"}]' base-url="https://apertureorlando.com"></floor-plan-page-main-component>
+</div>
+`
+
+const RENTPRESS_SNIPPET = `
+<div style="height: 100px;"></div>
+<div id='rentpress-app'
+             data-floorplans='[{&quot;floorplan_code&quot;:&quot;5676992_A1C&quot;,&quot;units&quot;:[]}]'>
 </div>
 `
 
@@ -55,6 +65,13 @@ describe('fingerprintEntrata', () => {
     const result = fingerprintEntrata(EMBEDDED_V2_SNIPPET)
     expect(result.isEntrata).toBe(true)
     expect(result.mode).toBe('embedded-v2')
+    expect(result.endpointPath).toBeNull()
+  })
+
+  it('detects the rentpress rentpress-app/data-floorplans= marker', () => {
+    const result = fingerprintEntrata(RENTPRESS_SNIPPET)
+    expect(result.isEntrata).toBe(true)
+    expect(result.mode).toBe('rentpress')
     expect(result.endpointPath).toBeNull()
   })
 
