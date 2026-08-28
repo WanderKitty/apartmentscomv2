@@ -46,7 +46,18 @@ console.log(`[reprocess] re-extracting ${rows.length} latest snapshot(s) with th
 let upserted = 0
 let failures = 0
 for (const r of rows) {
-  const out = await runProcess(pool, { llm }, { snapshotId: r.id, sourceId: r.source_id })
+  // runProcess books its counts against a scrape_runs row; give each
+  // reprocessed source its own run so the pass is visible in ops history
+  // instead of silently overwriting the latest scrape's numbers.
+  const { rows: run } = await pool.query<{ id: number }>(
+    `INSERT INTO scrape_runs (source_id) VALUES ($1) RETURNING id`,
+    [r.source_id],
+  )
+  const out = await runProcess(pool, { llm }, {
+    snapshotId: r.id,
+    sourceId: r.source_id,
+    runId: run[0]!.id,
+  })
   upserted += out.upserted
   failures += out.failures
   console.log(
