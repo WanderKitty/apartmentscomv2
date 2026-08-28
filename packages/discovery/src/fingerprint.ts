@@ -7,7 +7,7 @@
 // upstream Entrata/Yardi/RealPage feeds into a common markup shape, which
 // is why this fingerprint matters beyond one source (spec: Task 6A).
 
-export type FingerprintMode = 'rest' | 'embedded-v1' | 'embedded-v2' | 'rentpress'
+export type FingerprintMode = 'rest' | 'embedded-v1' | 'embedded-v2' | 'rentpress' | 'spherexx'
 
 export type FingerprintResult = {
   isEntrata: boolean
@@ -35,6 +35,11 @@ export type FingerprintResult = {
 const EMBEDDED_V1_RE = /<script[^>]*id="jd-fp-data-script-app"[^>]*>/
 const EMBEDDED_V2_RE = /:floor_plans='/
 const RENTPRESS_RE = /rentpress-app|data-floorplans='/
+// Spherexx marketing sites: server-rendered floorplan cards whose data-*
+// attributes carry the pricing story (see packages/scrapers/src/spherexx.ts
+// for the full extraction contract). Not an Entrata shape at all — but the
+// same fingerprint-then-verify pipeline serves it.
+const SPHEREXX_RE = /floorplans__floorplan[^"]*"[^>]*data-fp=/
 const REST_HINT_RE = /((?:\\\/|\/)wp-json(?:\\\/|\/)entrata(?:\\\/|\/)[a-zA-Z0-9\\/_-]*)/i
 
 // Order note: REST, then embedded-v1, then embedded-v2, then rentpress
@@ -64,6 +69,9 @@ export function fingerprintEntrata(html: string): FingerprintResult {
   }
   if (RENTPRESS_RE.test(html)) {
     return { isEntrata: true, mode: 'rentpress', endpointPath: null }
+  }
+  if (SPHEREXX_RE.test(html)) {
+    return { isEntrata: true, mode: 'spherexx', endpointPath: null }
   }
   return { isEntrata: false, mode: null, endpointPath: null }
 }

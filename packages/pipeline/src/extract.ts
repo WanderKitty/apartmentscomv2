@@ -10,7 +10,7 @@ import {
   type Concession,
   type ProcessedUnitData,
 } from '@aptv2/schema'
-import { parseEntrataPayload, sha256Json, type SourceRow } from '@aptv2/scrapers'
+import { parseEntrataPayload, parseSpherexxPayload, sha256Json, type SourceRow } from '@aptv2/scrapers'
 
 // Stage 3 (spec §5.3): deterministic mapping first — no LLM for price /
 // beds / baths / sqft / availability — then one enrichment call per
@@ -41,10 +41,16 @@ export async function extractSnapshot(
   },
 ): Promise<{ units: ProcessedUnitData[]; failures: Array<{ externalId: string; error: string }> }> {
   const { snapshot, source, now } = args
-  // baseUrl absolutizes any site-relative detail-page path the payload
-  // carries (e.g. the embedded shape's permalink) — required so
-  // `source_url` below is always a valid absolute URL for the schema.
-  const parsed = parseEntrataPayload(snapshot.payload, source.endpoint_config.endpoint_url) // shape error here fails the whole snapshot — correct: nothing is trustworthy
+  // Platform dispatch: spherexx sources carry extracted floorplan cards;
+  // everything else is the Entrata shape family. A shape error here fails
+  // the whole snapshot — correct: nothing is trustworthy. The baseUrl
+  // absolutizes any site-relative detail-page path the payload carries
+  // (e.g. the embedded shape's permalink) — required so `source_url` below
+  // is always a valid absolute URL for the schema.
+  const isSpherexx = source.endpoint_config.mode === 'spherexx'
+  const parsed = isSpherexx
+    ? parseSpherexxPayload(snapshot.payload, source.endpoint_config.endpoint_url)
+    : parseEntrataPayload(snapshot.payload, source.endpoint_config.endpoint_url)
   const prop = source.endpoint_config.property
   const nowIso = now.toISOString()
   const slots: Array<ProcessedUnitData | null> = new Array(parsed.length).fill(null)
@@ -115,9 +121,9 @@ export async function extractSnapshot(
       const base = minimalUnit()
       const record: ProcessedUnitData = ProcessedUnitDataSchema.parse({
         ...base,
-        source_id: `entrata${SOURCE_ID_SEPARATOR}${externalId}`,
-        platform: 'entrata',
-        collapse_key: `entrata:${externalId}`,
+        source_id: `${source.platform || 'entrata'}${SOURCE_ID_SEPARATOR}${externalId}`,
+        platform: (source.platform || 'entrata') as ProcessedUnitData['platform'],
+        collapse_key: `${source.platform || 'entrata'}:${externalId}`,
         liberal_dedup_cluster: `orlando:${slug(prop.address_line1)}-${slug(ru.unitNumber ?? ru.floorplanName ?? ru.externalId)}`,
         source_url: ru.detailUrl ?? source.website_url,
         data_provenance: 'scraped',
