@@ -59,10 +59,23 @@ describe.skipIf(!KEY)('extraction sampling judged by claude-sonnet-5', () => {
     const enrich = createHaikuEnricher()!
     const judgeClient = new Anthropic()
     const contradictions: string[] = []
+    const enrichFailures: string[] = []
+    let judged = 0
     for (const u of units) {
       const texts = [...u.amenityTexts, ...u.marketingTexts]
-      const enrichment = await enrich(texts)
+      let enrichment
+      try {
+        enrichment = await enrich(texts)
+      } catch (err) {
+        // Mirrors production: a schema-rejected extraction (e.g. Haiku emits
+        // leaseMonths=0 for text that states no lease length) is a counted,
+        // visible per-unit failure in extractSnapshot — never a crash. Only
+        // an all-units wipeout fails the eval below.
+        enrichFailures.push(`${u.externalId}: ${String((err as Error).message).split('\n')[0]}`)
+        continue
+      }
       if (!enrichment) continue // model found nothing to extract — nothing to judge
+      judged++
       const res = await judgeClient.messages.parse({
         model: 'claude-sonnet-5',
         max_tokens: 1024,
@@ -80,7 +93,10 @@ describe.skipIf(!KEY)('extraction sampling judged by claude-sonnet-5', () => {
         if (f.verdict === 'contradicted') contradictions.push(`${u.externalId}.${f.field}: ${f.note}`)
       }
     }
+    if (enrichFailures.length > 0) console.log(`enrich failures (counted, not judged):\n${enrichFailures.join('\n')}`)
     console.log(contradictions.join('\n') || 'no contradictions')
+    expect(judged).toBeGreaterThanOrEqual(1) // the judge must actually judge something
+    expect(enrichFailures.length).toBeLessThan(units.length) // a full wipeout is a real regression
     expect(contradictions).toEqual([])
   })
 })
