@@ -60,7 +60,7 @@ export function createPoliteFetcher(
     }
     let lastStatus = 0
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await sleep(1000 * 2 ** attempt) // exponential backoff
+      if (attempt > 0) await sleep(Math.max(1000 * 2 ** attempt, gapMs)) // exponential backoff, never faster than crawl-delay
       lastRequestAt.set(u.hostname, now())
       const res = await fetchImpl(url, { headers: { 'user-agent': USER_AGENT } })
       lastStatus = res.status

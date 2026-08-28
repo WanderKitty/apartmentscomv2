@@ -67,13 +67,15 @@ Plan 4's scrape pipeline will call. The in-memory implementation is gone.
 
 ## Ingestion
 
-Five pipeline stages (spec §5), each a `pg-boss` job, each idempotent:
+Five pipeline stages (spec §5), each idempotent. Discovery is a manual/CLI
+step; scrape and process-snapshot are the two pg-boss job types that carry
+the rest:
 
-1. **Discovery.** Sources are seeded as rows (`seed:sources`) — platform, endpoint URL, and a cached robots.txt policy per source.
-2. **Scrape.** A politeness-gated fetch of the source's endpoint; the payload is hashed and stored verbatim in `raw_snapshots`; an unchanged hash short-circuits the rest of the pipeline but still confirms the source's active listings.
-3. **Extract.** Deterministic adapter mapping first (price/beds/baths/sqft/availability — no LLM), then a fail-open Haiku-class call enriches unstructured fields (concessions, pet policy, etc.) when reachable, degrading to the deterministic result alone when it isn't.
-4. **Normalize + dedupe.** Extracted units are upserted into `properties`/`units`/`listings`; a listing missing from a snapshot that fully succeeded is marked gone.
-5. **Score + index.** The same trust/freshness/proximity blend and full-text index used by search (see below) apply to scraped listings exactly as they do to seeded ones.
+1. **Discovery.** Sources are seeded as rows via the `seed:sources` CLI command — platform, endpoint URL, and a cached robots.txt policy per source.
+2. **Scrape** (`scrape` job). A politeness-gated fetch of the source's endpoint; the payload is hashed and stored verbatim in `raw_snapshots`; an unchanged hash short-circuits the rest of the pipeline but still confirms the source's active listings.
+3. **Extract** (`process-snapshot` job). Deterministic adapter mapping first (price/beds/baths/sqft/availability — no LLM), then a fail-open Haiku-class call enriches unstructured fields (concessions, pet policy, etc.) when reachable, degrading to the deterministic result alone when it isn't.
+4. **Normalize + dedupe** (`process-snapshot` job, continued). Extracted units are upserted into `properties`/`units`/`listings`; a listing missing from a snapshot that fully succeeded goes active → stale, then stale → gone if it's still missing on the next cycle (one-cycle grace).
+5. **Score + index** (`process-snapshot` job, continued). The same trust/freshness/proximity blend and full-text index used by search (see below) apply to scraped listings exactly as they do to seeded ones.
 
 **Politeness posture:** robots.txt honored, including crawl-delay; ≤1 request/sec per domain; an identified User-Agent with a contact; public endpoints only; facts are stored, photos and marketing copy are linked to the source, never rehosted.
 

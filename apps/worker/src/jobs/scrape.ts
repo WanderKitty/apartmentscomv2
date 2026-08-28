@@ -60,13 +60,18 @@ export async function runScrape(
        VALUES ($1, $2, $3, $4) RETURNING id`,
       [sourceId, snap.content_hash, JSON.stringify(snap.payload), unchanged ? 'skipped_unchanged' : 'pending'],
     )
-    if (unchanged) await bumpConfirmed(pool, sourceId, new Date()) // hash short-circuit still confirms
+    // hash short-circuit still confirms every active listing is live; the
+    // confirmed count IS this run's listings_found — leaving it at the
+    // default 0 makes the admin delta read as a phantom mass-delisting on
+    // the (dominant) steady-state unchanged path (review IMPORTANT 1).
+    const confirmedCount = unchanged ? await bumpConfirmed(pool, sourceId, new Date()) : null
     await pool.query(
       `UPDATE sources SET last_scraped_at = now(), failure_streak = 0, robots_policy = $2 WHERE id = $1`,
       [sourceId, policy === null ? null : JSON.stringify(policy)],
     )
     await pool.query(
-      `UPDATE scrape_runs SET finished_at = now(), status = 'ok' WHERE id = $1`, [runId],
+      `UPDATE scrape_runs SET finished_at = now(), status = 'ok', listings_found = COALESCE($2, listings_found) WHERE id = $1`,
+      [runId, confirmedCount],
     )
     return { unchanged, snapshotId: unchanged ? null : inserted[0]!.id, runId }
   } catch (e) {
@@ -121,8 +126,11 @@ export async function runProcess(
       )
       console.error(`[process] ${summary}`)
     } else {
+      // Explicit 'ok' (not just left over from the fetch stage) so a
+      // pg-boss retry that later succeeds wins the status back from a
+      // 'failed' left by an earlier crashed attempt (review IMPORTANT 2).
       await pool.query(
-        `UPDATE scrape_runs SET listings_found = $2, listings_changed = 0 WHERE id = $1`,
+        `UPDATE scrape_runs SET listings_found = $2, listings_changed = 0, status = 'ok' WHERE id = $1`,
         [data.runId, units.length],
       )
     }
@@ -133,6 +141,14 @@ export async function runProcess(
       `UPDATE raw_snapshots SET processing_status = 'failed', error = $2 WHERE id = $1`,
       [data.snapshotId, (e as Error).message],
     )
+    // A whole-snapshot crash (e.g. payload shape error) must not leave the
+    // run row 'ok' from the fetch stage — the admin page would say
+    // everything is fine while processing silently failed (review IMPORTANT 2).
+    await pool.query(
+      `UPDATE scrape_runs SET status = 'failed', error = $2, finished_at = now() WHERE id = $1`,
+      [data.runId, (e as Error).message],
+    )
+    await pool.query(`UPDATE sources SET failure_streak = failure_streak + 1 WHERE id = $1`, [data.sourceId])
     throw e
   }
 }

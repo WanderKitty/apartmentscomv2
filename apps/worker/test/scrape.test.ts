@@ -17,6 +17,7 @@ let sourceId: number
 let disabledSourceId: number
 let robotsSourceId: number
 let corruptedSourceId: number
+let crashSourceId: number
 
 // The adapter always fetches via fetchText (Task 4 ruling 2) and does its
 // own JSON.parse; robots.txt is also fetched via fetchText, so this stub
@@ -65,6 +66,13 @@ beforeAll(async () => {
      RETURNING id`,
   )
   corruptedSourceId = corrupted[0].id
+  const { rows: crash } = await pool.query(
+    `INSERT INTO sources (platform, name, website_url, endpoint_config)
+     VALUES ('entrata', 'Crash Community', 'https://example.com/crash',
+             '{"endpoint_url":"https://example.com/crash/feed.json","property":{"name":"Crash Community","address_line1":"5 Fixture St","city":"Orlando","state":"FL","zip":"32801","latitude":28.54,"longitude":-81.38}}')
+     RETURNING id`,
+  )
+  crashSourceId = crash[0].id
 })
 afterAll(async () => {
   await pool.end()
@@ -97,6 +105,9 @@ describe('runScrape → runProcess', () => {
     const before = await pool.query(
       `SELECT max(last_confirmed_at) AS t FROM listings WHERE source_ref = $1`, [sourceId],
     )
+    const activeCount = await pool.query(
+      `SELECT count(*)::int AS n FROM listings WHERE source_ref = $1 AND status <> 'gone'`, [sourceId],
+    )
     const scrape = await runScrape(pool, { fetcher: fetcherFor(payloadText) }, sourceId)
     expect(scrape.unchanged).toBe(true)
     const after = await pool.query(
@@ -107,6 +118,13 @@ describe('runScrape → runProcess', () => {
       `SELECT processing_status FROM raw_snapshots WHERE source_id = $1 ORDER BY id DESC LIMIT 1`, [sourceId],
     )
     expect(snaps.rows[0].processing_status).toBe('skipped_unchanged')
+    // review IMPORTANT 1: the unchanged run must NOT leave listings_found at
+    // 0 — the admin delta LATERAL would read that as a phantom mass-delisting.
+    const run = await pool.query(
+      `SELECT status, listings_found FROM scrape_runs WHERE id = $1`, [scrape.runId],
+    )
+    expect(run.rows[0].status).toBe('ok')
+    expect(run.rows[0].listings_found).toBe(activeCount.rows[0].n)
   })
 
   it('a failed fetch records a failed run and bumps the failure streak', async () => {
@@ -206,5 +224,32 @@ describe('runScrape → runProcess', () => {
     expect(run.rows[0].status).toBe('partial')
     expect(run.rows[0].error).toMatch(/unit\(s\) failed extraction/)
     expect(run.rows[0].listings_found).toBe(corruptedProcessed.upserted)
+  })
+
+  it('a whole-snapshot parse crash marks the run failed and bumps the failure streak (review IMPORTANT 2)', async () => {
+    const { rows: run } = await pool.query(
+      `INSERT INTO scrape_runs (source_id) VALUES ($1) RETURNING id`, [crashSourceId],
+    )
+    const runId = run[0].id
+    const { rows: snap } = await pool.query(
+      `INSERT INTO raw_snapshots (source_id, content_hash, payload, processing_status)
+       VALUES ($1, 'crash-hash', $2, 'pending') RETURNING id`,
+      [crashSourceId, JSON.stringify({ nonsense: true })],
+    )
+    const snapshotId = snap[0].id
+
+    await expect(
+      runProcess(pool, { llm: null }, { snapshotId, sourceId: crashSourceId, runId }),
+    ).rejects.toThrow(/unrecognized payload shape/)
+
+    const runRow = await pool.query(`SELECT status, error FROM scrape_runs WHERE id = $1`, [runId])
+    expect(runRow.rows[0].status).toBe('failed')
+    expect(runRow.rows[0].error).toMatch(/unrecognized payload shape/)
+
+    const src = await pool.query(`SELECT failure_streak FROM sources WHERE id = $1`, [crashSourceId])
+    expect(src.rows[0].failure_streak).toBe(1)
+
+    const snapRow = await pool.query(`SELECT processing_status FROM raw_snapshots WHERE id = $1`, [snapshotId])
+    expect(snapRow.rows[0].processing_status).toBe('failed')
   })
 })

@@ -71,6 +71,27 @@ describe('createPoliteFetcher', () => {
     expect(sleeps.some((ms) => ms >= 4999)).toBe(true)
   })
 
+  it('a retry never sleeps shorter than the crawl-delay (review IMPORTANT 3)', async () => {
+    const sleeps: number[] = []
+    let clock = 0
+    const { impl } = fakeFetch([{ status: 503 }, { status: 200, body: { ok: 1 } }])
+    const f = createPoliteFetcher({
+      fetchImpl: impl,
+      now: () => clock,
+      sleep: async (ms) => {
+        sleeps.push(ms)
+        clock += ms
+      },
+    })
+    const policy = parseRobots('User-agent: *\nCrawl-delay: 5', USER_AGENT)
+    const r = await f.fetchJson('https://example.com/flaky', policy)
+    expect(r.status).toBe(200)
+    // The retry backoff (attempt 1: 1000 * 2**1 = 2000ms) is shorter than the
+    // 5s crawl-delay — the recorded sleep between the 503 and the retry must
+    // still be at least the crawl-delay, not the bare exponential value.
+    expect(sleeps.some((ms) => ms >= 4999)).toBe(true)
+  })
+
   it('retries 5xx with backoff then succeeds; gives up after 3 tries', async () => {
     const { impl } = fakeFetch([{ status: 503 }, { status: 503 }, { status: 200, body: { ok: 1 } }])
     const f = createPoliteFetcher({ fetchImpl: impl, sleep: async () => {} })
