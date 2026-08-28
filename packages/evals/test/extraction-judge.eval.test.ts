@@ -42,7 +42,7 @@ describe.skipIf(!KEY)('extraction sampling judged by claude-sonnet-5', () => {
         model: 'claude-sonnet-5',
         max_tokens: 1024,
         system:
-          'You verify data extraction. For each extracted field, judge strictly against ONLY the source texts: supported (text states it), not_in_text (extractor should have said null/not_mentioned), or contradicted (text says otherwise).',
+          'You verify data extraction. For each extracted field, judge strictly against ONLY the source texts: supported (text states it), not_in_text (a non-null extracted value the text does not state), or contradicted (a NON-NULL extracted value the text disputes). A null, not_mentioned, or omitted extracted value is NEVER a contradiction — extraction is required to be conservative, and declining to extract is always permitted.',
         messages: [
           {
             role: 'user',
