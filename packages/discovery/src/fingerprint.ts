@@ -1,61 +1,38 @@
-// Pure, offline detection of the four known Entrata payload shapes
-// (packages/scrapers/src/entrata.ts): a WordPress plugin ("af3-*" family)
-// that exposes availability data either as a standalone JSON REST route, or
-// embedded inline in a floor-plans HTML page in one of three formats — the
-// third (rentpress) is a distinct component from the same plugin lineage
-// used by a separate "RentPress" WordPress plugin family that syndicates
-// upstream Entrata/Yardi/RealPage feeds into a common markup shape, which
-// is why this fingerprint matters beyond one source (spec: Task 6A).
+// Pure, offline detection of the payload shapes the scrapers understand
+// (packages/scrapers/src/entrata.ts): the Entrata "af3-*" WordPress family
+// as a JSON REST route or one of three embedded HTML formats — rentpress is
+// a sibling plugin family syndicating Entrata/Yardi/RealPage feeds into
+// common markup — plus Spherexx-built sites.
 
 export type FingerprintMode = 'rest' | 'embedded-v1' | 'embedded-v2' | 'rentpress' | 'spherexx'
 
 export type FingerprintResult = {
   isEntrata: boolean
   mode: FingerprintMode | null
-  /** For 'rest' mode only: the site-relative JSON endpoint path discovered
-   * in the page markup (e.g. "/wp-json/entrata/v3/termrent-floor-plans").
-   * Embedded modes carry their data in the SAME page that was fingerprinted
-   * — there is no separate endpoint to record. */
+  /** For 'rest' mode only: the site-relative JSON endpoint path found in
+   * the page markup. Embedded modes carry their data in the fingerprinted
+   * page itself — no separate endpoint to record. */
   endpointPath: string | null
 }
 
-// Mirrors entrata.ts's EMBEDDED_JSON_RE / V2_EMBEDDED_ATTR_RE / rentpress
-// detection markers exactly (same regexes as the real extractor uses to
-// locate the payload — RENTPRESS_RE is deliberately looser than the
-// extractor's own RENTPRESS_EMBEDDED_ATTR_RE, matching either the
-// `rentpress-app` element id or a bare `data-floorplans='` attribute, so
-// fingerprinting still fires even if a future rentpress page renders the
-// attribute on a differently-id'd element), plus a REST hint: WordPress
-// core (and plugins built on it, like the af3-* family) commonly localizes
-// a REST route's URL into an inline <script> for frontend JS to consume —
-// the same mechanism as core WP's own `wpApiSettings.root`. We look for
-// that literal "/wp-json/entrata/..." path fragment (escaped `\/` forms
-// included, since it's typically embedded inside a JSON-in-JS string
-// literal).
+// Same markers the real extractors use to locate payloads (entrata.ts).
+// RENTPRESS_RE is deliberately looser than the extractor's own regex —
+// matching the `rentpress-app` id OR a bare `data-floorplans='` attribute —
+// so a differently-id'd rentpress page still fingerprints. The REST hint
+// matches the literal "/wp-json/entrata/..." fragment WP localizes into
+// inline JS (escaped `\/` forms included).
 const EMBEDDED_V1_RE = /<script[^>]*id="jd-fp-data-script-app"[^>]*>/
 const EMBEDDED_V2_RE = /:floor_plans='/
 const RENTPRESS_RE = /rentpress-app|data-floorplans='/
-// Spherexx marketing sites: server-rendered floorplan cards whose data-*
-// attributes carry the pricing story (see packages/scrapers/src/spherexx.ts
-// for the full extraction contract). Not an Entrata shape at all — but the
-// same fingerprint-then-verify pipeline serves it.
+// Spherexx sites: server-rendered floorplan cards, data-* attributes carry
+// pricing (packages/scrapers/src/spherexx.ts). Not an Entrata shape, but
+// the same fingerprint-then-verify pipeline serves it.
 const SPHEREXX_RE = /floorplans__floorplan[^"]*"[^>]*data-fp=/
 const REST_HINT_RE = /((?:\\\/|\/)wp-json(?:\\\/|\/)entrata(?:\\\/|\/)[a-zA-Z0-9\\/_-]*)/i
 
-// Order note: REST, then embedded-v1, then embedded-v2, then rentpress
-// (mirrors entrata.ts's extractEmbeddedJson try-order exactly). REST is
-// checked FIRST. On the (so far unobserved, and vanishingly unlikely) page
-// that carries both a REST hint AND an embedded marker, this takes the
-// REST path. That's an acceptable, deliberate choice rather than an
-// accident: a dedicated JSON API route is a strictly cleaner, more
-// reliable signal to probe than scraping an embedded JS blob out of HTML,
-// so when both are present the more trustworthy one should win. Among the
-// three embedded markers, order is otherwise immaterial in practice — each
-// one's marker string is specific to its own shape and none has been
-// observed to co-occur with another — but v1/v2/rentpress is kept as the
-// canonical order since it matches the extractor's own try sequence. No
-// real fixture exercises any dual-marker case; this is a documented
-// judgment call, not a load-bearing assumption.
+// Try order mirrors entrata.ts's extractEmbeddedJson. REST is checked
+// first deliberately: on a page carrying both a REST hint and an embedded
+// marker (never observed), the dedicated JSON route is the cleaner signal.
 export function fingerprintEntrata(html: string): FingerprintResult {
   const restMatch = html.match(REST_HINT_RE)
   if (restMatch) {

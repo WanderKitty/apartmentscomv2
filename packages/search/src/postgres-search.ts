@@ -10,14 +10,13 @@ import {
 } from '@aptv2/schema'
 import { parseQuery } from './llm-parse'
 
-// Retrieval + ranking per spec §6.2–6.3: one SQL query, hard WHERE
-// filters, ST_Covers on neighborhood boundaries, tsquery on residual
-// text, linear blend 0.35·text + 0.30·freshness + 0.25·trust +
-// 0.10·proximity computed in SQL. Undisclosed price sorts last.
-// Dedup collapse (same physical unit, several sources) happens in TS on
-// the returned page — the corpus is metro-scale, not web-scale.
+// One SQL query: hard WHERE filters, ST_Covers on neighborhood boundaries,
+// tsquery on residual text, linear blend 0.35·text + 0.30·freshness +
+// 0.25·trust + 0.10·proximity. Undisclosed price sorts last. Dedup collapse
+// (same physical unit, several sources) happens in TS on the returned page —
+// the corpus is metro-scale, not web-scale.
 
-const FRESHNESS_HALF_LIFE_SECONDS = 3 * 86_400 // spec §5.5
+const FRESHNESS_HALF_LIFE_SECONDS = 3 * 86_400
 
 const SEARCH_SQL = `
 -- Wrapped one level deeper so ORDER BY's CASE can see score_total: Postgres
@@ -198,10 +197,8 @@ function trueCostOf(row: Row): TrueCost | null {
     c?.type === 'free_weeks' && lease ? `${c.free_weeks} wk free ÷ ${lease} mo`
     : c?.type === 'free_months' && lease ? `${c.free_months} mo free ÷ ${lease} mo`
     : c?.type === 'flat_discount' && lease ? `$${d(c.value_cents ?? 0)} off ÷ ${lease} mo`
-    // A net-effective discount without a structured concession record — e.g.
-    // a deterministic "special rate" fact (spec-adjacent to entrata ingestion)
-    // rather than an LLM-parsed concession — still deserves a label, not
-    // "No concessions".
+    // A net-effective discount without a structured concession record still
+    // deserves a label, not "No concessions".
     : concessionMonthly > 0 ? 'Special rate'
     : 'No concessions'
   return {
@@ -261,7 +258,7 @@ function rowToListing(row: Row, now: Date): Listing {
   }
 }
 
-/** B1 collapse, ported from the demo: cheapest source is the primary card. */
+/** Dedup collapse: the cheapest source becomes the primary card. */
 function collapseDuplicates(listings: Listing[], sort: ParsedQuery["sort"]): Listing[] {
   const byCluster = new Map<string, Listing[]>()
   for (const l of listings) {
@@ -446,9 +443,8 @@ export function createSearchService(
           : null,
       ])
       const collapsed = collapseDuplicates(rows.map((r) => rowToListing(r, now)), parsed.sort)
-      // Zero results with active filters: tell the visitor which SINGLE
-      // filter removal would unlock listings — transparency-as-UX, same
-      // ethos as the parse echo. Costs queries only on the empty path.
+      // Zero results with active filters: count which SINGLE filter removal
+      // would unlock listings. Costs queries only on the empty path.
       let relaxationHints: SearchResult['relaxationHints'] = []
       if (collapsed.length === 0) {
         const drops = activeDrops(parsed)
@@ -467,9 +463,8 @@ export function createSearchService(
         }
       }
       const searchMs = Math.round((performance.now() - t0) * 100) / 100
-      // Spec §6.1: every parse is logged. Awaited for determinism (the
-      // insert is sub-ms at this scale) but a logging failure must never
-      // fail a search.
+      // Every parse is logged. Awaited for determinism (sub-ms at this
+      // scale), but a logging failure must never fail a search.
       try {
         await pool.query(
           `INSERT INTO search_logs (raw_query, parsed_filters, parse_source, result_count)
@@ -477,7 +472,7 @@ export function createSearchService(
           [rawQuery, JSON.stringify(parsed), parsed.parseSource, collapsed.length],
         )
       } catch {
-        // counted-visible logging comes with the ops work in a later plan
+        // intentionally swallowed — see above
       }
       return {
         listings: collapsed,

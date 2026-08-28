@@ -37,7 +37,7 @@ function seedUnit(n: number, over: Partial<ProcessedUnitData>): ProcessedUnitDat
     source_url: `https://example.com/seed/${id}`,
     ...over,
   };
-  // Per-physical-unit dedup cluster unless the override pinned one (B1):
+  // Per-physical-unit dedup cluster unless the override pinned one:
   // every unit must NOT inherit minimalUnit()'s example cluster.
   if (!over.liberal_dedup_cluster) {
     merged.liberal_dedup_cluster = `orlando:${slug(merged.property_name)}-${slug(
@@ -297,7 +297,7 @@ export function buildSeedUnits(now: Date): ProcessedUnitData[] {
     );
   });
 
-  // ---- B1: deliberate cross-platform duplicate — same physical unit, two sources.
+  // ---- Deliberate cross-platform duplicate — same physical unit, two sources.
   // SAME liberal_dedup_cluster, DIFFERENT collapse_key; provenance stays "seed"
   // (platform and provenance are separate schema fields for exactly this).
   const ridgewoodCluster = "orlando:412-e-ridgewood-st-402";

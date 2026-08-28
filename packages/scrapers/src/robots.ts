@@ -1,7 +1,7 @@
-// Minimal robots.txt parser (spec §7): user-agent groups, Disallow/Allow
-// prefixes (with `*` wildcards and a trailing `$` anchor — Google REP
-// semantics), Crawl-delay. The bot token (text before "/") selects the
-// most specific matching group; "*" is the fallback.
+// Minimal robots.txt parser: user-agent groups, Disallow/Allow prefixes
+// (with `*` wildcards and a trailing `$` anchor — Google REP semantics),
+// Crawl-delay. The bot token (text before "/") selects the most specific
+// matching group; "*" is the fallback.
 
 export type RobotsPolicy = {
   disallow: string[]
@@ -70,11 +70,8 @@ function patternToRegex(pattern: string): RegExp {
  */
 export function isPathAllowed(policy: RobotsPolicy, path: string): boolean {
   type Match = { length: number; allow: boolean }
-  // `allow` is guarded at point of use: every `sources.robots_policy` row
-  // written before this task is JSONB with only {disallow,
-  // crawlDelaySeconds} — no data backfill, so a legacy row must not crash
-  // here (it would otherwise TypeError on every scrape until a fresh 200
-  // robots.txt refresh rewrites the stored policy).
+  // Legacy `sources.robots_policy` rows lack `allow` — guard here rather
+  // than crash every scrape until a robots.txt refresh rewrites them.
   const allowPatterns = policy.allow ?? []
   const matches: Match[] = [
     ...policy.disallow.filter((p) => patternToRegex(p).test(path)).map((p) => ({ length: p.length, allow: false })),

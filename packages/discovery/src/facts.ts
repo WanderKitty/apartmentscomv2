@@ -1,7 +1,7 @@
 // Property-facts extraction: deterministic schema.org LD+JSON first, a
 // Haiku fallback on visible page text second (both fail-open), and a
 // Nominatim geocode fallback ONLY when coordinates are still missing after
-// either path (spec-adjacent, Task 5 Global Constraints).
+// either path.
 
 import Anthropic from '@anthropic-ai/sdk'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
@@ -104,17 +104,12 @@ const TITLE_RE = /<title[^>]*>([\s\S]*?)<\/title>/i
 const BODY_RE = /<body[^>]*>([\s\S]*)/i
 const SANITY_BODY_WINDOW = 2000
 
-/** Review finding: a real captured fixture (Aperture) carries a stale/wrong
- * LD+JSON block (a different property's template — "Kinetic" in Atlanta, GA,
- * with no geo) that would otherwise be trusted verbatim. Before a
- * deterministic LD+JSON result is trusted, it must pass two cheap sanity
- * checks against the SAME page: the declared state must be FL (LD+JSON
- * carrying an out-of-state address is a strong stale/wrong-template signal
- * for a site this pipeline only ever targets in Florida), and the declared
- * name must actually appear somewhere a human would see it (the page
- * <title>, or the first 2KB of the rendered body) — not just inside the
- * LD+JSON block itself. Failing either sanity check falls through to the
- * (fail-open) llm path rather than registering untrustworthy data. */
+/** Real sites carry stale wrong-template LD+JSON (a captured fixture
+ * declares a different property in another state), so a deterministic
+ * result must pass two sanity checks against the SAME page: the declared
+ * state is FL, and the declared name appears where a human would see it
+ * (the <title> or the first 2KB of body) — not just inside the LD+JSON
+ * block. Failure falls through to the fail-open llm path. */
 function passesSanityGate(core: FactsCore, html: string): boolean {
   if (core.state !== 'FL') return false
   const title = html.match(TITLE_RE)?.[1] ?? ''
@@ -162,12 +157,9 @@ export async function extractPropertyFacts(html: string, _url: string, deps: Fac
   return { ...result.core, ...geo }
 }
 
-// ---------------------------------------------------------------------
-// Haiku fallback: mirrors packages/pipeline/src/extract.ts's
-// createHaikuEnricher (single client.messages.parse call, zodOutputFormat,
-// fail-open at construction AND at call time — no key means every
-// candidate simply falls through to "no facts" rather than erroring).
-// ---------------------------------------------------------------------
+// Haiku fallback: mirrors pipeline's createHaikuEnricher — fail-open at
+// construction AND at call time (no key means candidates fall through to
+// "no facts" rather than erroring).
 
 const FactsSchema = z.object({
   name: z.string().nullable(),

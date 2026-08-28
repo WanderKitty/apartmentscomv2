@@ -8,20 +8,15 @@ import type { PoliteFetcher } from '@aptv2/scrapers'
 import { verifyCandidate, type Candidate, type VerifyResult, type VerifyVerdict, type RobotsCache } from './verify'
 import type { LlmFactsExtractor, GeocodeFn } from './facts'
 
-// This file's own directory (packages/discovery/src) — used to pin the
-// default report path to the package root regardless of the process's
-// current working directory (review minor: `pnpm --filter` and a bare `tsx`
-// invocation can have different CWDs).
+// Pins the default report path to the package root — `pnpm --filter` and a
+// bare `tsx` invocation can have different CWDs.
 const PACKAGE_DIR = fileURLToPath(new URL('..', import.meta.url))
 
-// discover-cli (Task 6 runs this, supervised — NOT run in this task). Reads
-// the candidates file, verifies them SEQUENTIALLY (one candidate's ≤4
-// requests complete before the next candidate starts — never concurrent,
-// per the compliance constraints), prints one progress line per candidate,
-// and writes a full report (gitignored — see packages/discovery/candidates
-// vs. this report's git status). Idempotent by website_url: re-running is
-// safe because verifyCandidate's own upsert is ON CONFLICT (website_url) DO
-// NOTHING.
+// Reads the candidates file, verifies each (a candidate's ≤4 requests
+// complete before its host's next candidate starts), prints one progress
+// line per candidate, and writes a full report (gitignored). Idempotent:
+// verifyCandidate's upsert is ON CONFLICT (website_url) DO NOTHING, so
+// re-running is safe.
 
 const CandidateSchema = z.object({
   url: z.string().url(),
@@ -75,13 +70,12 @@ export async function runDiscoverCli(candidatesPath: string, deps: DiscoverCliDe
     VerifyVerdict,
     number
   >
-  // Shared across the whole run (review C1): N candidates on the same host
-  // cost exactly ONE robots.txt fetch, not N.
+  // Shared across the whole run: N candidates on the same host cost
+  // exactly ONE robots.txt fetch, not N.
   const robotsCache: RobotsCache = new Map()
 
   // Nominatim is a single shared 1 req/s resource — serialize it globally
-  // regardless of candidate concurrency (chain pattern from the supervised
-  // fast-run experiments).
+  // regardless of candidate concurrency.
   let geoChain: Promise<unknown> = Promise.resolve()
   const rawGeocode = deps.geocode
   const geocode: GeocodeFn | undefined = rawGeocode
@@ -93,13 +87,10 @@ export async function runDiscoverCli(candidatesPath: string, deps: DiscoverCliDe
     : undefined
 
   // Host-keyed concurrency: the compliance posture is per-DOMAIN (≤1 req/s
-  // toward any single site, robots first, ≤4 requests per candidate) —
-  // none of which constrains candidates on DIFFERENT hosts. Each worker
-  // owns ONE host's whole candidate queue, so a host's requests stay
-  // sequential (naturally paced; the politeness fetcher's per-host token
-  // bucket is the backstop) and the robotsCache never sees concurrent
-  // access to the same key. concurrency=1 reproduces the original fully
-  // sequential runner.
+  // per site, robots first, ≤4 requests per candidate), which doesn't
+  // constrain DIFFERENT hosts. Each worker owns one host's whole queue, so
+  // a host's requests stay sequential and the robotsCache never sees
+  // concurrent access to the same key. concurrency=1 is fully sequential.
   const concurrency = Math.max(1, deps.concurrency ?? 1)
   const hostQueues = new Map<string, number[]>()
   for (let i = 0; i < candidates.length; i++) {
@@ -160,7 +151,7 @@ if (isMain) {
     concurrencyIdx >= 0 && Number(args[concurrencyIdx + 1]) > 0 ? Number(args[concurrencyIdx + 1]) : 8
   // Only exclude the flag's VALUE index when the flag is actually present —
   // concurrencyIdx + 1 is 0 when absent, which would swallow the candidates
-  // path itself (the CI failure: bare invocation printed usage and exited).
+  // path itself.
   const flagValueIndexes = new Set(concurrencyIdx >= 0 ? [concurrencyIdx + 1] : [])
   const candidatesArg = args.find((a, i) => !a.startsWith('--') && !flagValueIndexes.has(i))
   if (!candidatesArg) {
@@ -170,7 +161,7 @@ if (isMain) {
   const pool = getPool()
   const result = await runDiscoverCli(candidatesArg, {
     pool,
-    // retry429: false (review I3) — a rate-limited candidate site during a
+    // retry429: false — a rate-limited candidate site during a
     // first-contact verification probe must fail fast, not be hammered.
     fetcher: createPoliteFetcher({ retry429: false }),
     llm: createHaikuFactsExtractor() ?? undefined,

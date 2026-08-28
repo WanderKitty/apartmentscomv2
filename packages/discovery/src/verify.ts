@@ -15,23 +15,17 @@ import { FLORIDA_CITIES } from '@aptv2/schema'
 import { fingerprintEntrata } from './fingerprint'
 import { extractCoreFacts, type LlmFactsExtractor, type GeocodeFn } from './facts'
 
-// The verifier program (spec §7, Task 5 Global Constraints): every network
-// request goes through the injected politeness fetcher, robots is checked
-// FIRST, and at most 4 requests are made per candidate (robots, homepage,
-// one optional secondary "endpoint probe" page, one optional contact/about
-// page) — accounted for explicitly below via `requestsUsed`, incremented
-// BEFORE each await so a throwing request still counts (review I2).
-// Sequential by construction: this function makes one candidate's requests
-// one at a time and returns; discover-cli is responsible for not running
-// candidates concurrently.
+// Candidate verifier: every network request goes through the injected
+// politeness fetcher, robots is checked FIRST, and at most 4 requests are
+// made per candidate — `requestsUsed` is incremented BEFORE each await so a
+// throwing request still counts. One candidate's requests run sequentially;
+// discover-cli is responsible for not running candidates concurrently.
 
 export type Candidate = { url: string; metro: string; note?: string }
 
-// 'unreachable' (review I4/I5): the candidate's own reachability could not
-// be established at all (robots.txt 403/5xx/throw, or the homepage itself
-// throws — 5xx/429/network) — distinct from 'not_entrata', which asserts we
-// DID reach the site and it isn't Entrata. An unreachable site tells us
-// nothing either way.
+// 'unreachable': reachability could not be established (robots.txt
+// 403/5xx/throw, or the homepage itself throws) — distinct from
+// 'not_entrata', which asserts we DID reach the site.
 export type VerifyVerdict =
   | 'registered'
   | 'not_entrata'
@@ -44,9 +38,8 @@ export type VerifyVerdict =
 export type VerifyResult = { url: string; verdict: VerifyVerdict; detail: string }
 
 export type RobotsCacheEntry = { kind: 'ok'; policy: RobotsPolicy } | { kind: 'unreachable' }
-/** Per-host robots.txt memoization (review C1): shared across every
- * `verifyCandidate` call in one discover-cli run so N candidates on the
- * same host cost exactly one robots.txt fetch, not N. Keyed by origin. */
+/** Per-host robots.txt memoization, keyed by origin: N candidates on the
+ * same host cost one robots.txt fetch per discover-cli run, not N. */
 export type RobotsCache = Map<string, RobotsCacheEntry>
 
 export type VerifyDeps = {
@@ -54,12 +47,11 @@ export type VerifyDeps = {
   llm?: LlmFactsExtractor
   geocode?: GeocodeFn
   /** Shared across a discover-cli run (see `RobotsCache`); defaults to a
-   * fresh, call-local Map when omitted (a single verifyCandidate call still
-   * behaves correctly on its own — it just doesn't get cross-call reuse). */
+   * fresh call-local Map when omitted. */
   robotsCache?: RobotsCache
 }
 
-const NOT_PUBLIC_DETAIL = 'not publicly accessible' // the ONLY permitted characterization, anywhere (Global Constraints)
+const NOT_PUBLIC_DETAIL = 'not publicly accessible' // the ONLY permitted characterization of a gated site, anywhere
 const UNREACHABLE_DETAIL = 'unreachable at verification time'
 const MAX_REQUESTS = 4
 
@@ -69,14 +61,10 @@ function result(url: string, verdict: VerifyVerdict, detail: string): VerifyResu
   return { url, verdict, detail }
 }
 
-/** Normalizes to a trailing-slash URL string so relative resolution below
- * treats the candidate's own path as a DIRECTORY, not a file to replace
- * (review C1): a path-scoped candidate like
- * `https://mgmt.co/properties/slug` must probe
- * `https://mgmt.co/properties/slug/floor-plans/` (a subdirectory of ITS
- * OWN page), not `https://mgmt.co/properties/floor-plans/` (a sibling of
- * `slug` at the shared host's directory level) — the latter is wrong for
- * every multi-property site hosted on one domain. */
+/** Normalizes to a trailing slash so relative resolution treats the
+ * candidate's own path as a DIRECTORY: `https://mgmt.co/properties/slug`
+ * must probe `.../slug/floor-plans/`, not `.../properties/floor-plans/` —
+ * the latter is wrong for every multi-property site on one domain. */
 function withTrailingSlash(url: string): string {
   return url.endsWith('/') ? url : `${url}/`
 }
@@ -88,9 +76,8 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
   const robotsCache: RobotsCache = deps.robotsCache ?? new Map()
   let requestsUsed = 0
 
-  // 1) robots.txt FIRST — exempt from its own gating (policy: null).
-  // Memoized per host: only the FIRST candidate on a given origin actually
-  // fetches robots.txt this run (review C1).
+  // 1) robots.txt FIRST — exempt from its own gating (policy: null);
+  // memoized per host.
   let policy: RobotsPolicy;
   {
     const cached = robotsCache.get(origin)
@@ -99,13 +86,12 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
       policy = cached.policy
     } else {
       policy = PERMISSIVE_POLICY
-      requestsUsed++ // charged before the await (review I2): a throw must still count
+      requestsUsed++ // charged before the await: a throw must still count
       try {
         const robotsRes = await fetcher.fetchText(`${origin}/robots.txt`, null)
         // REP treats a server error fetching robots.txt as temporary full
-        // disallow; first contact gets the conservative reading rather than
-        // assuming permissive (review I5). A plain 404 (no robots.txt at
-        // all) is the normal, permissive case.
+        // disallow — conservative on first contact. A plain 404 (no
+        // robots.txt at all) is the normal, permissive case.
         if (robotsRes.status === 403 || (robotsRes.status >= 500 && robotsRes.status < 600)) {
           robotsCache.set(origin, { kind: 'unreachable' })
           return result(candidate.url, 'unreachable', UNREACHABLE_DETAIL)
@@ -113,8 +99,8 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
         if (robotsRes.status === 200) policy = parseRobots(robotsRes.body, USER_AGENT)
         robotsCache.set(origin, { kind: 'ok', policy })
       } catch {
-        // Network error, or the politeness fetcher's own retry-exhaustion
-        // throw (5xx/429) — robots.txt could not be established at all.
+        // Network error or retry-exhaustion throw — robots.txt could not
+        // be established at all.
         robotsCache.set(origin, { kind: 'unreachable' })
         return result(candidate.url, 'unreachable', UNREACHABLE_DETAIL)
       }
@@ -128,7 +114,7 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
 
   // 2) Homepage (the candidate's own URL).
   let homepageHtml: string
-  requestsUsed++ // charged before the await (review I2)
+  requestsUsed++ // charged before the await
   try {
     const res = await fetcher.fetchText(candidate.url, policy)
     if (res.status === 401 || res.status === 403) return result(candidate.url, 'not_public', NOT_PUBLIC_DETAIL)
@@ -147,16 +133,11 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
   // fingerprint + endpoint probe.
   let primaryHtml = homepageHtml
   let primaryUrl = candidate.url
-  // REST is checked first in fingerprintEntrata; on the vanishingly unlikely
-  // page that carries both an embedded marker AND a REST endpoint hint, the
-  // REST path wins (a dedicated JSON API is a cleaner, more reliable signal
-  // than scraping an embedded JS blob — see fingerprint.ts).
   let fp = fingerprintEntrata(homepageHtml)
   if (!fp.isEntrata) {
     // Two conventional secondary paths, budget-gated, first hit wins:
-    // "floor-plans/" (Entrata WP shapes) and "floorplans/" (Spherexx).
-    // A second probe simply displaces the optional contact page below —
-    // the ≤4-request budget still holds.
+    // "floor-plans/" (Entrata WP shapes) and "floorplans/" (Spherexx). A
+    // second probe displaces the optional contact page — ≤4 still holds.
     for (const probe of ['floor-plans/', 'floorplans/']) {
       const floorplansUrl = new URL(probe, candidateBase).toString()
       if (floorplansUrl === candidate.url || requestsUsed >= MAX_REQUESTS) continue
@@ -215,10 +196,9 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
   }
 
   // 5) Core (non-geo) property facts: deterministic/LLM on the primary
-  // page, falling back to one contact/about page if budget allows and
-  // nothing was found. Geocoding is deferred until AFTER the scope gate
-  // below (review I7) — an out-of-scope candidate must burn zero Nominatim
-  // requests.
+  // page, falling back to one contact/about page if budget allows.
+  // Geocoding is deferred until AFTER the scope gate — an out-of-scope
+  // candidate must burn zero Nominatim requests.
   let coreResult = await extractCoreFacts(primaryHtml, { llm: deps.llm })
   if (!coreResult && requestsUsed < MAX_REQUESTS) {
     const contactUrl = new URL('contact/', candidateBase).toString()
@@ -235,7 +215,7 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
   if (!coreResult) return result(candidate.url, 'no_facts', 'could not determine property name/address from any fetched page')
   const { core } = coreResult
 
-  // 6) Scope gate — BEFORE geocoding (review I7).
+  // 6) Scope gate — BEFORE geocoding.
   if (core.state !== 'FL' || !(FLORIDA_CITIES as readonly string[]).includes(core.city)) {
     return result(candidate.url, 'out_of_scope', `"${core.city}, ${core.state}" is not in FLORIDA_CITIES scope`)
   }

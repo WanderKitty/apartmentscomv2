@@ -12,7 +12,7 @@ export type {
   SearchService,
 } from "@aptv2/schema";
 
-// Admin / ops (§8) — read model over sources + scrape_runs. Web-local.
+// Admin / ops — read model over sources + scrape_runs. Web-local.
 export interface SourceHealth {
   id: string;
   name: string;

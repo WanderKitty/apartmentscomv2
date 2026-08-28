@@ -27,8 +27,8 @@ if (!llm) {
 
 const pool = getPool()
 // Latest snapshot per source, only ones already fully or partially
-// processed (pending/failed ones belong to the normal worker path; failed
-// snapshots have nothing trustworthy to re-extract — spec §5).
+// processed: pending/failed ones belong to the normal worker path, and
+// failed snapshots have nothing trustworthy to re-extract.
 const { rows } = await pool.query<{ id: number; source_id: number; content_hash: string }>(`
   SELECT DISTINCT ON (source_id) id, source_id, content_hash
   FROM raw_snapshots

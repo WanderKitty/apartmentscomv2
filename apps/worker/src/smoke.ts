@@ -5,8 +5,8 @@ import { createHaikuEnricher } from '@aptv2/pipeline'
 import { createPoliteFetcher, isPathAllowed } from '@aptv2/scrapers'
 import { runProcess, runScrape } from './jobs/scrape'
 
-// The ONLY other networked path besides the scheduler (Task 6's DoD runs
-// this once, deliberately). `pnpm --filter @aptv2/worker smoke -- --source <id>`
+// One-off manual scrape+process for a single source — the only networked
+// path besides the scheduler. `pnpm --filter @aptv2/worker smoke -- --source <id>`
 
 config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) })
 

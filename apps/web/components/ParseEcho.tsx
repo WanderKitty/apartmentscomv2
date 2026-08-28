@@ -27,7 +27,7 @@ function chips(parsed: ParsedQuery): string[] {
   if (parsed.shortTerm) out.push("Short term OK");
   out.push(...parsed.amenities);
   // Ordering intent is understanding too — show it, else "cheapest" feels
-  // like it vanished (it did, before sort semantics existed).
+  // like it vanished.
   if (parsed.sort === "price_asc") out.push("Sorted by price ↑");
   else if (parsed.sort === "price_desc") out.push("Sorted by price ↓");
   else if (parsed.sort === "newest") out.push("Newest first");
@@ -38,8 +38,8 @@ function chips(parsed: ParsedQuery): string[] {
 }
 
 /**
- * The parse echo — shows what the query parser understood (spec §6.1),
- * so the search never feels like a black box.
+ * The parse echo — shows what the query parser understood, so the search
+ * never feels like a black box.
  */
 export function ParseEcho({ parsed }: { parsed: ParsedQuery }) {
   const items = chips(parsed);

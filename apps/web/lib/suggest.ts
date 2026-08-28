@@ -1,11 +1,9 @@
-// Search-bar autosuggest. Pure and synchronous — the vocabulary is tiny,
-// no API round-trip. Every suggestion must lead to RESULTS on the live
-// corpus: neighborhoods and amenities were removed from the vocabulary
-// because no scraped property falls inside the (crude bbox) neighborhood
-// polygons and the enricher extracts no amenities — both made every such
-// suggestion a guaranteed "0 listings" dead end. Restore them from
-// @aptv2/schema's NEIGHBORHOOD_ALIASES / AMENITY_KEYWORDS once real
-// polygons and amenity extraction land.
+// Search-bar autosuggest. Pure and synchronous — tiny vocabulary, no API
+// round-trip. Rule: every suggestion must lead to RESULTS on the live
+// corpus; a promoted query landing on "0 listings" reads as a broken site.
+// Neighborhoods/amenities beyond "downtown" are out of the vocabulary until
+// the corpus can satisfy them (restore from @aptv2/schema's
+// NEIGHBORHOOD_ALIASES / AMENITY_KEYWORDS).
 
 export type Suggestion = {
   label: string;
@@ -14,11 +12,7 @@ export type Suggestion = {
   apply: string;
 };
 
-// Every example MUST return results on the live corpus — a promoted query
-// that lands on "0 listings" reads as a broken site. The scraped corpus
-// currently has no neighborhood containment and no extracted amenities, so
-// examples stick to beds/price/furnished until those land (verified against
-// prod 2026-08-28: 20 / 21 / 8 / 8 results).
+// Verified against prod 2026-08-28: 20 / 21 / 8 / 8 results.
 export const EXAMPLE_QUERIES = [
   "2 bed downtown",
   "furnished 1 bed under $2,500",
@@ -36,9 +30,7 @@ const CANDIDATES: Array<{ label: string; kind: Suggestion["kind"]; terms: string
   { label: "furnished", kind: "filter", terms: ["furnished"] },
   { label: "under $2,000", kind: "filter", terms: ["under $2,000"] },
   { label: "under $2,500", kind: "filter", terms: ["under $2,500"] },
-  // The one neighborhood with live inventory (138 downtown listings after
-  // the real-polygon backfill, verified 2026-08-28). Others rejoin as the
-  // corpus grows into them.
+  // The one neighborhood with live inventory (verified 2026-08-28).
   { label: "downtown", kind: "neighborhood", terms: ["downtown", "downtown orlando", "cbd"] },
 ];
 

@@ -4,10 +4,10 @@ import { getPool, closePool } from '@aptv2/db'
 import { seedNeighborhoods } from './neighborhoods'
 import { seedSources } from './sources-seed'
 
-// Production seeding: geography + source registry ONLY. Listings arrive
-// exclusively through the scrape pipeline (user ruling: prod corpus is
-// real scraped data, never demo seed rows). Exits nonzero if any seed
-// listing is found in the target database.
+// Production seeding: geography + source registry ONLY. The prod corpus is
+// real scraped data, never demo seed rows — listings arrive exclusively
+// through the scrape pipeline. Exits nonzero if any seed listing is found
+// in the target database.
 config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) })
 
 const pool = getPool()

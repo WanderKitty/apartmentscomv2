@@ -1,11 +1,8 @@
-// Spherexx-built marketing sites (spherexx.com — a Chattanooga apartment
-// website vendor; ZRS and other FL managers run on it) render available
-// floorplans as server-side <article class="floorplans__floorplan"> cards
-// whose data-* attributes carry the whole pricing story — including the
-// base-rent vs advertised split and the mandatory monthly fee total, the
-// fee-transparency facts most sources bury in prose. One polite GET of the
-// /floorplans/ page yields the available set at floorplan granularity
-// ("starting at"), the same honesty tier as the Entrata embedded shapes.
+// Spherexx-built marketing sites (ZRS and other FL managers run on the
+// vendor) render floorplans as server-side <article> cards whose data-*
+// attributes carry the pricing story, including the base-rent vs
+// advertised split and mandatory monthly fees. One polite GET of
+// /floorplans/ yields the available set at floorplan granularity.
 
 import { coerceMaxRps, sha256Json } from './politeness'
 import { EntrataPayloadError, type EntrataUnit } from './entrata'
@@ -53,8 +50,8 @@ export function extractSpherexxCards(html: string): SpherexxCard[] {
     const fp = attr(attrs, 'fp')
     const name = attr(attrs, 'name')
     if (fp === null || fp === '' || name === null || name === '') continue
-    // Beds/baths come from the card's OWN text ("2 BED • 2 Bath") — never
-    // from section chrome, which lists every bed type as navigation.
+    // Beds/baths come from the card's own text — section chrome lists
+    // every bed type as navigation.
     const bedsMatch = body.match(/(\d)\s*BED/i)
     const bathsMatch = body.match(/(\d(?:\.\d)?)\s*Bath/i)
     if (bedsMatch === null || bathsMatch === null) continue
@@ -106,8 +103,7 @@ export function parseSpherexxPayload(payload: unknown, baseUrl?: string): Entrat
     const maxPrice = priceOrNull(c.maxPriceDollars)
     const basePrice = priceOrNull(c.basePriceDollars)
     const marketing: string[] = [`${c.unitsAvailable} unit(s) available`]
-    // The fee split IS the honest-pricing story — hand it to extraction as
-    // structured-ish text so the true-cost math can use it.
+    // Hand the fee split to extraction as text so the true-cost math can use it.
     if (basePrice != null && c.feeTotalDollars != null && c.feeTotalDollars > 0) {
       marketing.push(
         `Base rent $${basePrice}/mo plus $${c.feeTotalDollars}/mo mandatory fees`,
