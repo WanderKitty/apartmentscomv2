@@ -11,11 +11,16 @@ export type Suggestion = {
   apply: string;
 };
 
+// Every example MUST return results on the live corpus — a promoted query
+// that lands on "0 listings" reads as a broken site. The scraped corpus
+// currently has no neighborhood containment and no extracted amenities, so
+// examples stick to beds/price/furnished until those land (verified against
+// prod 2026-08-28: 20 / 21 / 8 / 8 results).
 export const EXAMPLE_QUERIES = [
-  "furnished 1br near Lake Eola under $2,000",
-  "2 bed in Baldwin Park with a pool",
-  "pet friendly studio in College Park",
-  "cheapest 2 bed downtown",
+  "furnished 1 bed under $2,500",
+  "2 bed under $2,200",
+  "studio under $2,000",
+  "furnished studio",
 ];
 
 const CANDIDATES: Array<{ label: string; kind: Suggestion["kind"]; terms: string[] }> = [

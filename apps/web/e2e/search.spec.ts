@@ -10,7 +10,7 @@ test("home page offers search and example queries", async ({ page, searchPage })
   ).toBeVisible();
   await expect(searchPage.searchInput).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "2 bed in Baldwin Park with a pool" }),
+    page.getByRole("link", { name: "2 bed under $2,200" }),
   ).toBeVisible();
 });
 

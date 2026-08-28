@@ -4,7 +4,7 @@ import { ScrollTour } from "@/components/ScrollTour";
 import { EXAMPLE_QUERIES } from "@/lib/suggest";
 
 const STATS: Array<[string, string]> = [
-  ["Scraped 3×/day", "from the properties’ own websites"],
+  ["Straight from the source", "every listing scraped from the property’s own website"],
   ["Every price timestamped", "you see when we last confirmed it"],
   ["Zero reposted photos", "images and applications stay at the source"],
 ];
@@ -20,7 +20,7 @@ export function Hero() {
           Every listing, straight from the property.
         </h1>
         <p className="mx-auto mt-3 max-w-[560px] text-center text-[16px] leading-6 text-muted">
-          Orlando apartments scraped 3×/day from community websites — prices
+          Orlando apartments scraped straight from community websites — prices
           timestamped, concessions decoded, nothing rehosted.
         </p>
 
