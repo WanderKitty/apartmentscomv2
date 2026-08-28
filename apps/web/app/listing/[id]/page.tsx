@@ -1,3 +1,5 @@
+import { cache } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MiniMap } from "@/components/MiniMap";
@@ -20,9 +22,25 @@ function longDate(iso: string): string {
   });
 }
 
+// Per-request memo so metadata and page share one lookup.
+const getListing = cache((id: string) => searchService.getListing(id));
+
+// Resolving here — before the streaming shell flushes — keeps an unknown
+// id an honest HTTP 404 even though the route now has a loading.tsx
+// (notFound() thrown after the shell commits would surface as a 200).
+// Bonus: real page titles.
+export async function generateMetadata(
+  props: PageProps<"/listing/[id]">,
+): Promise<Metadata> {
+  const { id } = await props.params;
+  const listing = await getListing(id);
+  if (!listing) notFound();
+  return { title: `${listing.propertyName} — Eola` };
+}
+
 export default async function ListingPage(props: PageProps<"/listing/[id]">) {
   const { id } = await props.params;
-  const listing = await searchService.getListing(id);
+  const listing = await getListing(id);
   if (!listing) notFound();
   const now = new Date();
 
