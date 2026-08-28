@@ -48,14 +48,21 @@ export async function extractSnapshot(
   const units: ProcessedUnitData[] = []
   const failures: Array<{ externalId: string; error: string }> = []
 
-  for (const ru of parsed) {
+  // Keyed on the enrichment INPUTS only (not the whole raw unit) so a
+  // rent/availability change doesn't bust an LLM result that's still valid.
+  const unitHashes = parsed.map((ru) => sha256Json({ texts: [...ru.amenityTexts, ...ru.marketingTexts], v: 2 }))
+  // Scale fix: one batched lookup for the whole snapshot instead of a
+  // per-unit round trip — a large snapshot could otherwise issue hundreds
+  // of individual cache SELECTs.
+  const cached = await fetchCachedEnrichments(pool, unitHashes)
+
+  for (let i = 0; i < parsed.length; i++) {
+    const ru = parsed[i]!
     try {
       const externalId = `${slug(prop.name)}-${slug(ru.externalId)}`
       const texts = [...ru.amenityTexts, ...ru.marketingTexts]
-      // Keyed on the enrichment INPUTS only (not the whole raw unit) so a
-      // rent/availability change doesn't bust an LLM result that's still valid.
-      const unitHash = sha256Json({ texts, v: 2 })
-      const enrichment = await cachedEnrichment(pool, unitHash, args.llm ?? null, texts)
+      const unitHash = unitHashes[i]!
+      const enrichment = await cachedEnrichment(pool, unitHash, args.llm ?? null, texts, cached)
       // Guard (prod incident 2026-08-28): a concession without a positive
       // lease term cannot be amortized — netEffectiveMonthlyCents divides by
       // leaseMonths, so 0 produced Infinity and failed every enriched unit.
@@ -90,7 +97,7 @@ export async function extractSnapshot(
         city: prop.city,
         state: prop.state,
         zip: prop.zip,
-        neighborhood: '', // resolved spatially at upsert (Task 5 amendment)
+        neighborhood: '', // resolved spatially at upsert
         latitude: prop.latitude,
         longitude: prop.longitude,
         unit_number: ru.unitNumber,
@@ -148,16 +155,29 @@ export async function extractSnapshot(
   return { units, failures }
 }
 
+/** One batched lookup for every unit hash in the snapshot (write path stays per-unit — see `cachedEnrichment`). */
+async function fetchCachedEnrichments(pool: pg.Pool, hashes: string[]): Promise<Map<string, LlmEnrichment | null>> {
+  const cached = new Map<string, LlmEnrichment | null>()
+  if (hashes.length === 0) return cached
+  const { rows } = await pool.query(
+    `SELECT content_hash, extracted FROM extract_cache WHERE content_hash = ANY($1)`,
+    [hashes],
+  )
+  for (const row of rows) cached.set(row.content_hash, row.extracted as LlmEnrichment | null)
+  return cached
+}
+
 async function cachedEnrichment(
   pool: pg.Pool,
   hash: string,
   llm: LlmEnricher | null,
   texts: string[],
+  cached: Map<string, LlmEnrichment | null>,
 ): Promise<LlmEnrichment | null> {
-  const { rows } = await pool.query(`SELECT extracted FROM extract_cache WHERE content_hash = $1`, [hash])
   // A stored JSON `null` (from a prior "nothing to extract" result) is
-  // still a row — this is a cache HIT returning null, not a miss.
-  if (rows[0]) return rows[0].extracted as LlmEnrichment | null
+  // still a HIT — `.has` (not truthiness of the value) distinguishes it
+  // from a genuine miss.
+  if (cached.has(hash)) return cached.get(hash) ?? null
   if (!llm || texts.every((t) => !t.trim())) return null
   try {
     const out = await llm(texts)
@@ -168,6 +188,9 @@ async function cachedEnrichment(
        ON CONFLICT (content_hash) DO NOTHING`,
       [hash, JSON.stringify(out ?? null)],
     )
+    // Two units in the SAME snapshot can share a hash (identical texts) —
+    // record it locally so the second one doesn't re-call the LLM.
+    cached.set(hash, out)
     return out
   } catch {
     return null // fail-open by design: enrichment degrades, the listing still lands

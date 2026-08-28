@@ -28,9 +28,11 @@ export function sha256Json(value: unknown): string {
   return createHash('sha256').update(stableStringify(value)).digest('hex')
 }
 
+export type FetchOpts = { maxRps?: number }
+
 export type PoliteFetcher = {
-  fetchJson(url: string, policy: RobotsPolicy | null): Promise<{ status: number; body: unknown }>
-  fetchText(url: string, policy: RobotsPolicy | null): Promise<{ status: number; body: string }>
+  fetchJson(url: string, policy: RobotsPolicy | null, opts?: FetchOpts): Promise<{ status: number; body: unknown }>
+  fetchText(url: string, policy: RobotsPolicy | null, opts?: FetchOpts): Promise<{ status: number; body: string }>
 }
 
 export function createPoliteFetcher(
@@ -49,10 +51,14 @@ export function createPoliteFetcher(
 
   // ONE politeness path for every request kind: robots gate, per-domain
   // spacing, UA, retry with backoff. Body handling is the only variance.
-  async function politeRequest(url: string, policy: RobotsPolicy | null): Promise<Response> {
+  async function politeRequest(url: string, policy: RobotsPolicy | null, opts?: FetchOpts): Promise<Response> {
     const u = new URL(url)
     if (policy && !isPathAllowed(policy, u.pathname)) throw new RobotsDisallowedError(url)
-    const gapMs = Math.max(minGapMs, (policy?.crawlDelaySeconds ?? 0) * 1000)
+    // A per-call maxRps (e.g. a source's own rate_limit_rps) overrides the
+    // fetcher's default spacing for just this call; crawl-delay still wins
+    // over either when it demands something slower.
+    const callGapMs = opts?.maxRps ? 1000 / opts.maxRps : minGapMs
+    const gapMs = Math.max(callGapMs, (policy?.crawlDelaySeconds ?? 0) * 1000)
     const last = lastRequestAt.get(u.hostname)
     if (last !== undefined) {
       const wait = last + gapMs - now()
@@ -71,13 +77,13 @@ export function createPoliteFetcher(
   }
 
   return {
-    async fetchJson(url, policy) {
-      const res = await politeRequest(url, policy)
+    async fetchJson(url, policy, callOpts) {
+      const res = await politeRequest(url, policy, callOpts)
       const body = await res.json().catch(() => null)
       return { status: res.status, body }
     },
-    async fetchText(url, policy) {
-      const res = await politeRequest(url, policy)
+    async fetchText(url, policy, callOpts) {
+      const res = await politeRequest(url, policy, callOpts)
       return { status: res.status, body: await res.text() }
     },
   }

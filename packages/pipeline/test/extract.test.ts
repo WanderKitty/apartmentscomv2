@@ -4,7 +4,7 @@ import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { Pool } from 'pg'
 import { resetTestDb } from '@aptv2/db/test-helpers'
 import { ProcessedUnitDataSchema } from '@aptv2/schema'
-import type { SourceRow } from '@aptv2/scrapers'
+import { parseEntrataPayload, sha256Json, type SourceRow } from '@aptv2/scrapers'
 import { createHaikuEnricher, extractSnapshot } from '../src/extract'
 
 const payload = JSON.parse(
@@ -183,6 +183,54 @@ describe('extractSnapshot', () => {
     })
     expect(failures).toEqual([])
     expect(units[8]!.pets_allowed).toBe('not_mentioned')
+  })
+})
+
+describe('extractSnapshot: cache batch-fetch path', () => {
+  it('a pre-existing cache row is honored via a single content_hash = ANY($1) prefetch, identically to the per-unit lookup', async () => {
+    const rawUnits = parseEntrataPayload(payload, SOURCE.endpoint_config.endpoint_url)
+    const withTextIndex = rawUnits.findIndex((u) => u.amenityTexts.length + u.marketingTexts.length > 0)
+    expect(withTextIndex).toBeGreaterThanOrEqual(0)
+    const texts = [...rawUnits[withTextIndex]!.amenityTexts, ...rawUnits[withTextIndex]!.marketingTexts]
+    const preCachedHash = sha256Json({ texts, v: 2 })
+    const preCached = {
+      pets_allowed: 'allowed' as const, concession_text: null, concession: null,
+      furnished: null, short_term_ok: null, summary: 'pre-cached',
+    }
+    const cacheStore = new Map<string, unknown>([[preCachedHash, preCached]])
+    const enricherCalls: string[][] = []
+    const enricher = async (calledTexts: string[]) => {
+      enricherCalls.push(calledTexts)
+      return {
+        pets_allowed: 'not_allowed' as const, concession_text: null, concession: null,
+        furnished: null, short_term_ok: null, summary: 'fresh',
+      }
+    }
+    // A minimal fake pool that only understands a batched ANY($1) prefetch
+    // and the per-miss insert — any other query shape (e.g. a per-unit
+    // `content_hash = $1` lookup) fails the test, forcing the batch design.
+    const fakePool = {
+      async query(sql: string, params?: unknown[]) {
+        if (/content_hash = ANY\(\$1\)/.test(sql)) {
+          const hashes = params![0] as string[]
+          const rows = hashes.filter((h) => cacheStore.has(h)).map((h) => ({ content_hash: h, extracted: cacheStore.get(h) }))
+          return { rows }
+        }
+        if (/INSERT INTO extract_cache/.test(sql)) {
+          const [hash, json] = params as [string, string]
+          if (!cacheStore.has(hash)) cacheStore.set(hash, JSON.parse(json))
+          return { rows: [] }
+        }
+        throw new Error(`extractSnapshot must batch-fetch extract_cache via one ANY($1) query; got: ${sql}`)
+      },
+    }
+    const { units, failures } = await extractSnapshot(fakePool as unknown as Pool, {
+      snapshot: { id: 99, source_id: SOURCE.id, payload }, source: SOURCE, now: NOW, llm: enricher,
+    })
+    expect(failures).toEqual([])
+    const preCachedUnit = units[withTextIndex]!
+    expect(preCachedUnit.pets_allowed).toBe('allowed') // served from the pre-seeded cache row, not the enricher
+    expect(enricherCalls.some((t) => sha256Json({ texts: t, v: 2 }) === preCachedHash)).toBe(false)
   })
 })
 
