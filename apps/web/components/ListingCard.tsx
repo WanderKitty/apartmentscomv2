@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { CardLink } from "./CardLink";
 import type { Listing } from "@/lib/types";
 import { formatBedsBaths, formatPrice, formatSqft } from "@/lib/format";
 import { FreshnessBadge } from "./FreshnessBadge";
@@ -38,7 +38,7 @@ export function ListingCard({
           : undefined
       }
     >
-      <Link
+      <CardLink
         href={`/listing/${listing.id}`}
         data-testid="listing-card"
         className="group block"
@@ -177,7 +177,7 @@ export function ListingCard({
             </p>
           )}
         </div>
-      </Link>
+      </CardLink>
     </li>
   );
 }
