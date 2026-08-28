@@ -71,7 +71,9 @@ export function ListingCard({
 
           <p className="truncate text-[16px] font-medium text-ink">
             {listing.propertyName}
-            <span className="text-muted"> · {listing.neighborhood}</span>
+            {listing.neighborhood && (
+              <span className="text-muted"> · {listing.neighborhood}</span>
+            )}
           </p>
 
           <p className="text-[14px] text-body">{facts.join(" · ")}</p>
