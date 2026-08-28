@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Eola — Orlando apartment search",
   description:
-    "Search Orlando apartments scraped daily from property websites. Timestamped prices, decoded concessions, nothing rehosted.",
+    "Search Orlando apartments scraped three times a day from property websites. Timestamped prices, decoded concessions, nothing rehosted.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
