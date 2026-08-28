@@ -146,6 +146,46 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.33.0)(supports-color@7.2.0)(tsx@4.23.12)
 
+  packages/discovery:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.121.0
+        version: 0.121.0(zod@4.4.3)
+      '@aptv2/db':
+        specifier: workspace:*
+        version: link:../db
+      '@aptv2/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@aptv2/scrapers':
+        specifier: workspace:*
+        version: link:../scrapers
+      pg:
+        specifier: ^8.13.0
+        version: 8.23.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.23.1
+      dotenv:
+        specifier: ^16.4.0
+        version: 16.6.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(jsdom@30.0.1)(lightningcss@1.33.0)(supports-color@7.2.0)(tsx@4.23.12)
+
   packages/evals:
     devDependencies:
       '@anthropic-ai/sdk':
