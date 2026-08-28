@@ -8,7 +8,7 @@ import { ResultsSkeleton } from "@/components/ResultsSkeleton";
 import { SeedBanner } from "@/components/SeedBanner";
 import { ResultsSplit } from "@/components/ResultsSplit";
 import type { MapPin } from "@/components/MapView";
-import { pinPositions } from "@/lib/map-pins";
+import { groupPins } from "@/lib/map-pins";
 import { searchService } from "@/lib/search";
 
 export default async function Home(props: PageProps<"/">) {
@@ -54,17 +54,21 @@ async function SearchResults({
     : `/?q=${encodeURIComponent(q)}&debug=1`;
 
   const pinCards = new Map(listings.map((l) => [l.id, l]));
-  const pins: MapPin[] = pinPositions(listings).map((p) => {
-    const l = pinCards.get(p.id)!;
-    return {
-      ...p,
-      propertyName: l.propertyName,
-      price: l.price,
-      beds: l.beds,
-      baths: l.baths,
-      neighborhood: l.neighborhood,
-    };
-  });
+  const pins: MapPin[] = groupPins(listings).map((g) => ({
+    lat: g.lat,
+    lng: g.lng,
+    units: g.ids.map((id) => {
+      const l = pinCards.get(id)!;
+      return {
+        id,
+        propertyName: l.propertyName,
+        price: l.price,
+        beds: l.beds,
+        baths: l.baths,
+        neighborhood: l.neighborhood,
+      };
+    }),
+  }));
 
   return (
     <div>

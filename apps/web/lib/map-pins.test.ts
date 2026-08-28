@@ -1,38 +1,38 @@
 import { describe, it, expect } from "vitest";
-import { pinPositions } from "./map-pins";
+import { groupPins } from "./map-pins";
 
 const at = (id: string, lat: number | null, lng: number | null) => ({ id, lat, lng });
 
-describe("pinPositions", () => {
-  it("keeps unique coordinates exactly and drops listings without any", () => {
-    const pins = pinPositions([
+describe("groupPins", () => {
+  it("keeps distinct coordinates as separate single-listing pins and drops unlocated listings", () => {
+    const groups = groupPins([
       at("a", 28.5462, -81.3708),
       at("b", 28.5379, -81.3545),
       at("c", null, null),
     ]);
-    expect(pins).toEqual([
-      { id: "a", lat: 28.5462, lng: -81.3708 },
-      { id: "b", lat: 28.5379, lng: -81.3545 },
+    expect(groups).toEqual([
+      { lat: 28.5462, lng: -81.3708, ids: ["a"] },
+      { lat: 28.5379, lng: -81.3545, ids: ["b"] },
     ]);
   });
 
-  it("spreads colliding coordinates apart, deterministically, staying within ~150m", () => {
-    const input = [
-      at("a", 28.5462, -81.3708),
-      at("b", 28.5462, -81.3708),
-      at("c", 28.5462, -81.3708),
-    ];
-    const pins = pinPositions(input);
-    expect(pins).toHaveLength(3);
-    // All pairwise distinct after spreading.
-    const keys = pins.map((p) => `${p.lat},${p.lng}`);
-    expect(new Set(keys).size).toBe(3);
-    // Each stays close to the true coordinate (≤ 0.0015° ≈ 150m).
-    for (const p of pins) {
-      expect(Math.abs(p.lat - 28.5462)).toBeLessThanOrEqual(0.0015);
-      expect(Math.abs(p.lng - -81.3708)).toBeLessThanOrEqual(0.0015);
-    }
-    // Deterministic: same input, same output.
-    expect(pinPositions(input)).toEqual(pins);
+  it("collapses all listings at one coordinate into a single pin, never moving it", () => {
+    // A scraped property lists every unit at the building's coordinate —
+    // 100 units must be ONE pin at the exact spot, not a ring of 100.
+    const many = Array.from({ length: 100 }, (_, i) => at(`u${i}`, 28.5462, -81.3708));
+    const groups = groupPins([...many, at("solo", 28.55, -81.36)]);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toMatchObject({ lat: 28.5462, lng: -81.3708 });
+    expect(groups[0]!.ids).toHaveLength(100);
+    expect(groups[1]!.ids).toEqual(["solo"]);
+  });
+
+  it("preserves ranking order: groups by first appearance, ids in input order", () => {
+    const groups = groupPins([
+      at("first", 28.5, -81.3),
+      at("second", 28.6, -81.4),
+      at("third", 28.5, -81.3),
+    ]);
+    expect(groups.map((g) => g.ids)).toEqual([["first", "third"], ["second"]]);
   });
 });
