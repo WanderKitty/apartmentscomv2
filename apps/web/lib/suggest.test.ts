@@ -23,7 +23,13 @@ describe("buildSuggestions", () => {
     expect(s.some((x) => x.apply === "2 bed under $2,000")).toBe(true);
   });
 
-  it("no longer offers neighborhoods or amenities (dead ends on the scraped corpus)", () => {
+  it("completes Downtown Orlando — the one neighborhood with live inventory", () => {
+    const s = buildSuggestions("2 bed downt");
+    expect(s[0]).toMatchObject({ label: "downtown", kind: "neighborhood" });
+    expect(s[0]!.apply).toBe("2 bed downtown");
+  });
+
+  it("still offers no inventory-less neighborhoods or amenities", () => {
     expect(buildSuggestions("bald")).toEqual([]);
     expect(buildSuggestions("1br with poo")).toEqual([]);
   });

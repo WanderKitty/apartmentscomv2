@@ -8,6 +8,7 @@ import { SearchButton } from "./SearchButton";
 
 const KIND_LABEL: Record<Suggestion["kind"], string> = {
   filter: "filter",
+  neighborhood: "neighborhood",
   example: "try it",
 };
 
