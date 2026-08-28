@@ -52,17 +52,29 @@ function concessionJson(u: ProcessedUnitData) {
 export async function upsertProcessedUnits(
   pool: pg.Pool,
   units: ProcessedUnitData[],
+  opts?: { sourceRef?: number },
 ): Promise<{ properties: number; units: number; listings: number }> {
   const propertyIds = new Set<number>()
   const unitIds = new Set<number>()
   let listings = 0
+  const sourceRef = opts?.sourceRef ?? null
 
   for (const u of units) {
     const { rows: hood } = await pool.query(
       `SELECT id FROM neighborhoods WHERE metro = 'orlando' AND name = $1`,
       [u.neighborhood],
     )
-    const neighborhoodId: number | null = hood[0]?.id ?? null
+    let neighborhoodId: number | null = hood[0]?.id ?? null
+    if (neighborhoodId === null) {
+      // Scraped rows can carry neighborhood: "" (resolved at ingestion,
+      // not by the adapter) — fall back to spatial containment.
+      const { rows: spatial } = await pool.query(
+        `SELECT id FROM neighborhoods
+         WHERE ST_Covers(boundary, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) LIMIT 1`,
+        [u.longitude, u.latitude],
+      )
+      neighborhoodId = spatial[0]?.id ?? null
+    }
 
     const { rows: prop } = await pool.query(
       `INSERT INTO properties
@@ -109,6 +121,20 @@ export async function upsertProcessedUnits(
       ...u.unit_amenities, ...u.community_amenities,
     ].join(' ')
 
+    // Price-history append semantics (spec §5.2 amendment): on the conflict
+    // path, a price change appends exactly one synthesized event/history
+    // entry on top of what's already stored; an unchanged (or either-side
+    // null) price appends nothing and EXCLUDED.events/price_history (this
+    // run's freshly-synthesized first_listed event) is discarded entirely.
+    // The INSERT path is unaffected — it still uses the record's own
+    // events/history verbatim, so seed rows keep authoring full history and
+    // the seed corpus re-run stays idempotent (seed prices never change).
+    const priceChangedCase = `listings.price_cents IS NOT NULL AND EXCLUDED.price_cents IS NOT NULL AND listings.price_cents <> EXCLUDED.price_cents`
+    const nowIso = `to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
+    const appendedEvent = `jsonb_build_object('at', ${nowIso}, 'kind', CASE WHEN EXCLUDED.price_cents < listings.price_cents THEN 'price_drop' ELSE 'price_increase' END, 'from_cents', listings.price_cents, 'to_cents', EXCLUDED.price_cents, 'note', null)`
+    const appendedHistoryEntry = `jsonb_build_object('at', ${nowIso}, 'from_cents', listings.price_cents, 'to_cents', EXCLUDED.price_cents)`
+    const newPriceHistoryExpr = `(CASE WHEN ${priceChangedCase} THEN listings.price_history || jsonb_build_array(${appendedHistoryEntry}) ELSE listings.price_history END)`
+
     await pool.query(
       `INSERT INTO listings
          (unit_id, property_id, neighborhood_id, location, price_cents, price_is_starting_at,
@@ -116,10 +142,10 @@ export async function upsertProcessedUnits(
           status, first_listed_at, last_confirmed_at, price_history, price_changes,
           trust_score, search_text, collapse_key, dedup_cluster, source_platform,
           source_external_id, source_url, provenance, estimated_publish_date, description,
-          events, move_in_fees, concession)
+          events, move_in_fees, concession, source_ref)
        VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326)::geography, $6, $7,
                $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-               $23, $24, $25, $26, $27, $28, $29, $30)
+               $23, $24, $25, $26, $27, $28, $29, $30, $31)
        ON CONFLICT (collapse_key) DO UPDATE SET
          price_cents = EXCLUDED.price_cents,
          price_is_starting_at = EXCLUDED.price_is_starting_at,
@@ -130,15 +156,16 @@ export async function upsertProcessedUnits(
          furnished = EXCLUDED.furnished,
          status = EXCLUDED.status,
          last_confirmed_at = EXCLUDED.last_confirmed_at,
-         price_history = EXCLUDED.price_history,
-         price_changes = EXCLUDED.price_changes,
+         events = CASE WHEN ${priceChangedCase} THEN listings.events || jsonb_build_array(${appendedEvent}) ELSE listings.events END,
+         price_history = ${newPriceHistoryExpr},
+         price_changes = jsonb_array_length(${newPriceHistoryExpr}),
          trust_score = EXCLUDED.trust_score,
          search_text = EXCLUDED.search_text,
          dedup_cluster = EXCLUDED.dedup_cluster,
-         events = EXCLUDED.events,
          move_in_fees = EXCLUDED.move_in_fees,
          concession = EXCLUDED.concession,
-         description = EXCLUDED.description`,
+         description = EXCLUDED.description,
+         source_ref = EXCLUDED.source_ref`,
       [
         unitId, propertyId, neighborhoodId, u.longitude, u.latitude,
         u.advertised_rent_cents, u.price_level === 'floorplan_starting_at',
@@ -149,7 +176,7 @@ export async function upsertProcessedUnits(
         u.liberal_dedup_cluster, u.platform, sourceExternalId, u.source_url,
         u.data_provenance, u.estimated_publish_date, u.generated_summary,
         JSON.stringify(u.events), JSON.stringify(moveInFees(u)),
-        JSON.stringify(concessionJson(u)),
+        JSON.stringify(concessionJson(u)), sourceRef,
       ],
     )
     listings++
