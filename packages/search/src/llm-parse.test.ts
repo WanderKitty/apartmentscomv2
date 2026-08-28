@@ -25,6 +25,20 @@ function fakeClient(parsed: unknown, delayMs = 0) {
   };
 }
 
+/** All nulls except a consumed sort word — the exact "cheap" shape. */
+const EMPTY_OUT_SORT_ONLY = {
+  neighborhoods: [],
+  cities: [],
+  price_max_dollars: null,
+  beds_min: null,
+  beds_max: null,
+  furnished: null,
+  short_term: null,
+  amenities: [],
+  sort: "price_asc" as const,
+  residual_text: "",
+};
+
 beforeEach(() => __resetParseCacheForTests());
 
 describe("parseQueryWith", () => {
@@ -68,17 +82,31 @@ describe("parseQueryWith", () => {
     expect(p.sort).toBe("price_asc");
     expect(p.priceMax).toBeNull(); // "cheapest" is an ordering, never a price cap
   });
+
+  it("a sort-only query is NOT a gibberish fail-open (regression: 'cheap')", async () => {
+    // The LLM correctly consumes "cheap" into sort with an empty residual;
+    // the guardrail must count that as understanding — otherwise failedOpen
+    // flips true, the raw word becomes an FTS gate, and the UI shows
+    // "couldn't parse" under a "parsed by Haiku" badge.
+    const p = await parseQueryWith("cheap", fakeClient(EMPTY_OUT_SORT_ONLY) as never);
+    expect(p.parseSource).toBe("llm");
+    expect(p.sort).toBe("price_asc");
+    expect(p.residualText).toBe("");
+    expect(p.failedOpen).toBe(false);
+  });
 });
 
 describe("nothing-recognized queries fail open", () => {
   const EMPTY_OUT = {
     neighborhoods: [],
+    cities: [],
     price_max_dollars: null,
     beds_min: null,
     beds_max: null,
     furnished: null,
     short_term: null,
     amenities: [],
+    sort: "relevance" as const,
     residual_text: "",
   };
 

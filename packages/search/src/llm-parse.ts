@@ -89,12 +89,18 @@ export async function parseQueryWith(
     // exactly like the keyword rung's fail-open ladder (§6.1).
     const recognizedAnything =
       out.neighborhoods.length > 0 ||
+      out.cities.length > 0 ||
       out.price_max_dollars !== null ||
       out.beds_min !== null ||
       out.beds_max !== null ||
       out.furnished !== null ||
       out.short_term !== null ||
       out.amenities.length > 0 ||
+      // A consumed sort word IS understanding: "cheap" arrives as
+      // sort=price_asc with empty residual, and must not trip the
+      // gibberish fail-open (which would resurrect "cheap" as an FTS gate
+      // and claim the parse failed). Same for a bare city match.
+      out.sort !== "relevance" ||
       out.residual_text.trim() !== "";
     const parsed: ParsedQuery = {
       neighborhoods: out.neighborhoods,
