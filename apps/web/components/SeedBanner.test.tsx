@@ -31,4 +31,9 @@ describe("SeedBanner", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it("falls back to a no-listings line when both counts are zero", () => {
+    render(<SeedBanner seed={0} scraped={0} />);
+    expect(screen.getByText("Corpus: no listings yet.")).toBeInTheDocument();
+  });
 });

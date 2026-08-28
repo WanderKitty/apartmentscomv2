@@ -23,13 +23,19 @@ LEFT JOIN LATERAL (
   SELECT count(*)::int AS n FROM listings WHERE source_ref = s.id AND status = 'active'
 ) al ON true
 LEFT JOIN LATERAL (
+  -- 'failed' runs leave listings_found at its default 0 (never a real
+  -- count), so they must be invisible to this metric or a failed-most-
+  -- recently source would show a phantom negative delta. 'partial' runs
+  -- DO carry a real listings_found (the worker writes units.length on
+  -- both the clean and partial-failure branches).
   SELECT listings_found FROM scrape_runs
-  WHERE source_id = s.id
+  WHERE source_id = s.id AND status IN ('ok', 'partial')
   ORDER BY started_at DESC LIMIT 1
 ) latest ON true
 LEFT JOIN LATERAL (
   SELECT listings_found FROM scrape_runs
-  WHERE source_id = s.id AND started_at < now() - interval '24 hours'
+  WHERE source_id = s.id AND status IN ('ok', 'partial')
+    AND started_at < now() - interval '24 hours'
   ORDER BY started_at DESC LIMIT 1
 ) older ON true
 ORDER BY s.id

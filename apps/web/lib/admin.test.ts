@@ -35,6 +35,16 @@ beforeAll(async () => {
      VALUES ($1, now() - interval '25 hours', now() - interval '25 hours', 'ok', 10)`,
     [sourceId],
   );
+  // A third run, newer than both above, that failed — listings_found stays
+  // at its default 0 (never a real count) and must be invisible to
+  // listingDelta24h, or this source would show a phantom negative delta.
+  // started_at is nudged 1s ahead of the "now()" run above so ordering by
+  // started_at DESC is unambiguous, not a same-instant tie.
+  await pool.query(
+    `INSERT INTO scrape_runs (source_id, started_at, finished_at, status)
+     VALUES ($1, now() + interval '1 second', now() + interval '1 second', 'failed')`,
+    [sourceId],
+  );
 
   const { rows: prop } = await pool.query(
     `INSERT INTO properties (name, address_line1, city, state, zip, normalized_address, location)
