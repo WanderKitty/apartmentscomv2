@@ -83,7 +83,7 @@ export default async function Home(props: PageProps<"/">) {
       <SearchBar defaultValue={q} />
 
       <div className="mt-4">
-        <SeedBanner corpus={timing.corpus} />
+        <SeedBanner seed={timing.corpusSeed} scraped={timing.corpusScraped} />
       </div>
 
       <div className="mt-4">

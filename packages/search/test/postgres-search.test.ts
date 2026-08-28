@@ -63,6 +63,14 @@ describe('postgres SearchService', () => {
     expect(r.totalCount).toBe(25) // 26 minus the collapsed duplicate
   })
 
+  it('reports corpus split by provenance and caps the page', async () => {
+    const r = await service().search('')
+    expect(r.timing.corpusSeed).toBe(26)
+    expect(r.timing.corpusScraped).toBe(0) // this suite seeds only demo data
+    expect(r.timing.corpus).toBe(r.timing.corpusSeed + r.timing.corpusScraped)
+    expect(r.listings.length).toBeLessThanOrEqual(500)
+  })
+
   it('applies shortTerm=false as a hard filter', async () => {
     const p: ParsedQuery = {
       ...parseQueryKeywords(''),
