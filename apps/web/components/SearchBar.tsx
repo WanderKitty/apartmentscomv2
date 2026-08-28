@@ -95,6 +95,7 @@ export function SearchBar({ defaultValue = "" }: { defaultValue?: string }) {
           aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
           aria-autocomplete="list"
           autoComplete="off"
+          maxLength={300}
           className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-ink outline-none placeholder:text-muted-soft"
         />
         <SearchButton />

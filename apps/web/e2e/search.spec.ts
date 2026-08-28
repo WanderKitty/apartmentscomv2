@@ -9,6 +9,7 @@ test("home page offers search and example queries", async ({ page, searchPage })
     }),
   ).toBeVisible();
   await expect(searchPage.searchInput).toBeVisible();
+  await expect(searchPage.searchInput).toHaveAttribute("maxlength", "300");
   await expect(
     page.getByRole("link", { name: "2 bed in Baldwin Park with a pool" }),
   ).toBeVisible();
