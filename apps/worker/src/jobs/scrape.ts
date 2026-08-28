@@ -1,7 +1,7 @@
 import type pg from 'pg'
 import type PgBoss from 'pg-boss'
 import {
-  createPoliteFetcher, parseRobots, entrataAdapter, sha256Json,
+  createPoliteFetcher, parseRobots, entrataAdapter,
   type PoliteFetcher, type SourceRow,
 } from '@aptv2/scrapers'
 import {
@@ -21,12 +21,12 @@ async function loadSource(pool: pg.Pool, id: number): Promise<SourceRow> {
   return rows[0] as SourceRow
 }
 
-/** Stage 2 (spec §5.2). Returns { unchanged, snapshotId }. Throws on fetch failure AFTER recording the failed run. */
+/** Stage 2 (spec §5.2). Returns { unchanged, snapshotId, runId }. Throws on fetch failure AFTER recording the failed run. */
 export async function runScrape(
   pool: pg.Pool,
   deps: { fetcher: PoliteFetcher },
   sourceId: number,
-): Promise<{ unchanged: boolean; snapshotId: number | null }> {
+): Promise<{ unchanged: boolean; snapshotId: number | null; runId: number }> {
   const source = await loadSource(pool, sourceId)
   const { rows: run } = await pool.query(
     `INSERT INTO scrape_runs (source_id) VALUES ($1) RETURNING id`, [sourceId],
@@ -39,7 +39,15 @@ export async function runScrape(
       const origin = new URL(source.website_url).origin
       const res = await deps.fetcher.fetchText(`${origin}/robots.txt`, null)
       if (res.status === 200) policy = parseRobots(res.body, 'aptv2-research-bot')
-    } catch { /* robots fetch failure keeps the stored policy — recorded below either way */ }
+    } catch (e) {
+      // Robots fetch failure keeps the stored policy — recorded below either way.
+      console.warn(`[scrape] robots.txt refresh failed for source ${sourceId}, using stored policy:`, (e as Error).message)
+    }
+    // The adapter fetch MUST be gated by the policy we just refreshed, not
+    // the stale row loaded above — otherwise a first-ever scrape (stored
+    // policy null) runs ungated, and a newly published Disallow/Crawl-delay
+    // is ignored for a full cycle (review CRITICAL 1).
+    source.robots_policy = policy
 
     const snap = await entrataAdapter.fetch(source, deps.fetcher)
     const { rows: dup } = await pool.query(
@@ -60,7 +68,7 @@ export async function runScrape(
     await pool.query(
       `UPDATE scrape_runs SET finished_at = now(), status = 'ok' WHERE id = $1`, [runId],
     )
-    return { unchanged, snapshotId: unchanged ? null : inserted[0]!.id }
+    return { unchanged, snapshotId: unchanged ? null : inserted[0]!.id, runId }
   } catch (e) {
     await pool.query(
       `UPDATE scrape_runs SET finished_at = now(), status = 'failed', error = $2 WHERE id = $1`,
@@ -75,7 +83,7 @@ export async function runScrape(
 export async function runProcess(
   pool: pg.Pool,
   deps: { llm: LlmEnricher | null },
-  data: { snapshotId: number; sourceId: number },
+  data: { snapshotId: number; sourceId: number; runId: number },
 ): Promise<{ upserted: number; failures: number }> {
   const source = await loadSource(pool, data.sourceId)
   const { rows: snaps } = await pool.query(`SELECT id, source_id, payload FROM raw_snapshots WHERE id = $1`, [data.snapshotId])
@@ -85,14 +93,40 @@ export async function runProcess(
       snapshot: snaps[0], source, now: new Date(), llm: deps.llm,
     })
     await upsertProcessedUnits(pool, units, { sourceRef: data.sourceId })
-    await sweepVanished(pool, data.sourceId, units.map((u) => u.collapse_key))
+
+    // A snapshot with any extraction failures (or zero extracted units) is
+    // an incomplete view of what's really live — sweeping against it would
+    // stale/gone listings that simply failed to parse THIS cycle, not
+    // listings that actually vanished from the source (review IMPORTANT 2).
+    if (failures.length > 0 || units.length === 0) {
+      console.warn(
+        `[process] skipping sweepVanished for source ${data.sourceId}: ` +
+        (failures.length > 0 ? `${failures.length} extraction failure(s)` : 'zero units extracted'),
+      )
+    } else {
+      await sweepVanished(pool, data.sourceId, units.map((u) => u.collapse_key))
+    }
+
     await pool.query(`UPDATE raw_snapshots SET processing_status = 'processed' WHERE id = $1`, [data.snapshotId])
-    await pool.query(
-      `UPDATE scrape_runs SET listings_found = $2, listings_changed = $3
-       WHERE id = (SELECT max(id) FROM scrape_runs WHERE source_id = $1)`,
-      [data.sourceId, units.length, failures.length],
-    )
-    if (failures.length > 0) console.error(`[process] ${failures.length} unit(s) failed:`, failures)
+
+    // listings_changed isn't computed yet (no change-detection pass exists
+    // in this task) — always 0 for now. listings_found is the count of
+    // units this cycle successfully extracted (and upserted), regardless
+    // of failures.
+    if (failures.length > 0) {
+      const summary = `${failures.length} unit(s) failed extraction: ${failures.map((f) => f.externalId).join(', ')}`
+      await pool.query(
+        `UPDATE scrape_runs SET listings_found = $2, listings_changed = 0, status = 'partial', error = $3 WHERE id = $1`,
+        [data.runId, units.length, summary],
+      )
+      console.error(`[process] ${summary}`)
+    } else {
+      await pool.query(
+        `UPDATE scrape_runs SET listings_found = $2, listings_changed = 0 WHERE id = $1`,
+        [data.runId, units.length],
+      )
+    }
+
     return { upserted: units.length, failures: failures.length }
   } catch (e) {
     await pool.query(
@@ -126,10 +160,10 @@ export async function registerIngestionJobs(boss: PgBoss, pool: pg.Pool): Promis
   await boss.work(SCRAPE, { batchSize: 1 }, async ([job]) => {
     const { sourceId } = job!.data as { sourceId: number }
     const r = await runScrape(pool, { fetcher }, sourceId)
-    if (r.snapshotId !== null) await boss.send(PROCESS, { snapshotId: r.snapshotId, sourceId })
+    if (r.snapshotId !== null) await boss.send(PROCESS, { snapshotId: r.snapshotId, sourceId, runId: r.runId })
   })
   await boss.work(PROCESS, { batchSize: 1 }, async ([job]) => {
-    await runProcess(pool, { llm }, job!.data as { snapshotId: number; sourceId: number })
+    await runProcess(pool, { llm }, job!.data as { snapshotId: number; sourceId: number; runId: number })
   })
   await boss.work(SCRAPE_SWEEP, { batchSize: 1 }, async () => {
     const { rows: sources } = await pool.query(`SELECT id FROM sources WHERE enabled ORDER BY id`)
