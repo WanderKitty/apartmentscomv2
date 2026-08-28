@@ -6,6 +6,11 @@ freshness, and served behind a natural-language search bar.
 
 Full runbook: [`apps/web/README.md`](apps/web/README.md).
 
+Source discovery (`packages/discovery`) geocodes a property's address via
+Nominatim (OpenStreetMap) only when a candidate site's own markup has no
+coordinates, caching every result. Geocoding data © OpenStreetMap
+contributors — attributed in the site footer.
+
 ## Automation
 
 - **CI** (`.github/workflows/ci.yml`) — typecheck, every package's test suite

@@ -288,7 +288,11 @@ function decodeHtmlEntities(s: string): string {
     .replace(/&#x([0-9a-fA-F]+);/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)))
 }
 
-function extractEmbeddedJson(html: string): unknown {
+/** Exported for packages/discovery's verifier: lets it validate a candidate's
+ * embedded-mode fingerprint match against the SAME already-fetched HTML
+ * (no extra network request) using the exact same extraction the real
+ * scraper adapter uses below. */
+export function extractEmbeddedJson(html: string): unknown {
   const v1 = html.match(EMBEDDED_JSON_RE)
   if (v1) return JSON.parse(v1[1]!)
   const v2 = html.match(V2_EMBEDDED_ATTR_RE)
