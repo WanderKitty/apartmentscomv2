@@ -8,6 +8,8 @@ import {
   extractEmbeddedJson,
   type PoliteFetcher,
   type RobotsPolicy,
+  extractSpherexxCards,
+  parseSpherexxPayload,
 } from '@aptv2/scrapers'
 import { FLORIDA_CITIES } from '@aptv2/schema'
 import { fingerprintEntrata } from './fingerprint'
@@ -151,8 +153,13 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
   // than scraping an embedded JS blob — see fingerprint.ts).
   let fp = fingerprintEntrata(homepageHtml)
   if (!fp.isEntrata) {
-    const floorplansUrl = new URL('floor-plans/', candidateBase).toString()
-    if (floorplansUrl !== candidate.url && requestsUsed < MAX_REQUESTS) {
+    // Two conventional secondary paths, budget-gated, first hit wins:
+    // "floor-plans/" (Entrata WP shapes) and "floorplans/" (Spherexx).
+    // A second probe simply displaces the optional contact page below —
+    // the ≤4-request budget still holds.
+    for (const probe of ['floor-plans/', 'floorplans/']) {
+      const floorplansUrl = new URL(probe, candidateBase).toString()
+      if (floorplansUrl === candidate.url || requestsUsed >= MAX_REQUESTS) continue
       requestsUsed++
       try {
         const res = await fetcher.fetchText(floorplansUrl, policy)
@@ -162,6 +169,7 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
             fp = fp2
             primaryHtml = res.body
             primaryUrl = floorplansUrl
+            break
           }
         }
       } catch {
@@ -170,7 +178,7 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
     }
   }
   if (!fp.isEntrata) {
-    return result(candidate.url, 'not_entrata', 'no Entrata fingerprint found on homepage or /floor-plans/')
+    return result(candidate.url, 'not_entrata', 'no Entrata fingerprint found on homepage or conventional floorplans paths')
   }
 
   // 4) Resolve + validate the actual availability payload. REST mode needs
@@ -187,6 +195,15 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
       parseEntrataPayload(res.body, endpointUrl) // throws on unrecognized/malformed shape
     } catch (e) {
       return result(candidate.url, 'no_endpoint', `endpoint probe failed: ${(e as Error).message}`)
+    }
+  } else if (fp.mode === 'spherexx') {
+    try {
+      // Spherexx cards are server-rendered HTML — extract, then validate
+      // through the same parser the scrape worker will use.
+      const payload = extractSpherexxCards(primaryHtml)
+      parseSpherexxPayload(payload, primaryUrl)
+    } catch (e) {
+      return result(candidate.url, 'no_endpoint', `spherexx payload invalid: ${(e as Error).message}`)
     }
   } else {
     try {
@@ -249,9 +266,9 @@ export async function verifyCandidate(candidate: Candidate, fetcher: PoliteFetch
   }
   await deps.pool.query(
     `INSERT INTO sources (platform, name, website_url, endpoint_config, robots_policy, rate_limit_rps, enabled)
-     VALUES ('entrata', $1, $2, $3, $4, 1, true)
+     VALUES ($5, $1, $2, $3, $4, 1, true)
      ON CONFLICT (website_url) DO NOTHING`,
-    [facts.name, candidate.url, JSON.stringify(endpointConfig), JSON.stringify(policy)],
+    [facts.name, candidate.url, JSON.stringify(endpointConfig), JSON.stringify(policy), fp.mode === 'spherexx' ? 'spherexx' : 'entrata'],
   )
 
   return result(candidate.url, 'registered', `registered (mode=${fp.mode}, geocoded=${geocoded})`)

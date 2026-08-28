@@ -1,7 +1,7 @@
 import type pg from 'pg'
 import type PgBoss from 'pg-boss'
 import {
-  coerceMaxRps, createPoliteFetcher, parseRobots, entrataAdapter,
+  coerceMaxRps, createPoliteFetcher, parseRobots, entrataAdapter, spherexxAdapter,
   type PoliteFetcher, type SourceRow,
 } from '@aptv2/scrapers'
 import {
@@ -50,7 +50,10 @@ export async function runScrape(
     // is ignored for a full cycle.
     source.robots_policy = policy
 
-    const snap = await entrataAdapter.fetch(source, deps.fetcher)
+    const snap = await (source.endpoint_config.mode === 'spherexx' ? spherexxAdapter : entrataAdapter).fetch(
+      source,
+      deps.fetcher,
+    )
     // Only a FULLY processed prior snapshot licenses the short-circuit: a
     // 'partial' match means the last look at this exact content missed some
     // units, so identical content must be given another chance to extract
