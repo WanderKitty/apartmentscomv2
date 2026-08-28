@@ -82,7 +82,7 @@ export function ScrollTour() {
               <p className="text-[12px] font-bold uppercase tracking-[1.2px] text-rausch">
                 {String(i + 1).padStart(2, "0")}
               </p>
-              <h2 className="mt-2 text-[26px] font-bold leading-[1.25] tracking-[-0.3px] text-ink">
+              <h2 className="mt-2 text-[21px] font-bold leading-[1.43] text-ink">
                 {step.title}
               </h2>
               <p className="mt-3 max-w-[400px] text-[16px] leading-[1.55] text-body">
@@ -116,7 +116,7 @@ export function ScrollTour() {
             <p className="text-[12px] font-bold uppercase tracking-[1.2px] text-rausch">
               {String(i + 1).padStart(2, "0")}
             </p>
-            <h2 className="mt-1 text-[22px] font-bold leading-[1.3] text-ink">{step.title}</h2>
+            <h2 className="mt-1 text-[20px] font-semibold leading-[1.2] tracking-[-0.18px] text-ink">{step.title}</h2>
             <p className="mt-2 text-[15px] leading-[1.55] text-body">{step.body}</p>
             <Frame img={step.img} alt={step.alt} className="mt-4 h-72" />
           </div>

@@ -48,8 +48,10 @@ test("every result is a card with price or an honest no-price badge", async ({
   expect(n).toBeGreaterThan(0);
   for (let i = 0; i < n; i++) {
     const card = searchPage.cards.nth(i);
-    await expect(card.getByText(/^Studio · /).first()).toBeVisible();
-    const priced = await card.locator("span", { hasText: /^\$[\d,]+$/ }).count();
+    // Facts line (beds/baths) — may be prefixed by the neighborhood on the
+    // photo-first card, so the match is unanchored.
+    await expect(card.getByText(/Studio · /).first()).toBeVisible();
+    const priced = await card.getByText(/^\$[\d,]+/).count();
     const unpriced = await card.getByText("Price not listed").count();
     expect(priced + unpriced).toBeGreaterThan(0);
   }

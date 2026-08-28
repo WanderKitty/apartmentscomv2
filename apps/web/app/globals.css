@@ -25,10 +25,11 @@
      success color; everything else stays in-system). */
   --color-success: #008a05;
 
-  /* Type — stack verbatim from the reference doc. */
+  /* Type — stack per the reference doc, with Inter (the doc's named
+     open substitute for Cereal) loaded via next/font. */
   --font-sans:
-    "Airbnb Cereal VF", Circular, -apple-system, system-ui, Roboto,
-    "Helvetica Neue", sans-serif;
+    "Airbnb Cereal VF", Circular, var(--font-inter), -apple-system, system-ui,
+    Roboto, "Helvetica Neue", sans-serif;
 
   /* Elevation — the single shadow tier. */
   --shadow-tier:
