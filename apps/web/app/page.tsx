@@ -73,7 +73,8 @@ export default async function Home(props: PageProps<"/">) {
     );
   }
 
-  const { listings, parsed, totalCount, timing } = await searchService.search(q);
+  const { listings, parsed, totalCount, timing, relaxationHints } =
+    await searchService.search(q);
   const debugToggleHref = debug
     ? `/?q=${encodeURIComponent(q)}`
     : `/?q=${encodeURIComponent(q)}&debug=1`;
@@ -114,9 +115,24 @@ export default async function Home(props: PageProps<"/">) {
             No listings match everything you asked for.
           </p>
           <p className="mt-1 text-[14px] text-muted">
-            Drop a filter or widen the neighborhood — filters are hard limits,
-            never fudged.
+            Filters are hard limits, never fudged — but here is what one change
+            would unlock:
           </p>
+          {relaxationHints.length > 0 && (
+            <ul className="mx-auto mt-4 flex max-w-[420px] flex-col gap-2">
+              {relaxationHints.map((h) => (
+                <li key={h.drop}>
+                  <Link
+                    href={`/?q=${encodeURIComponent(h.suggestedQuery)}`}
+                    className="block rounded-card border border-hairline px-4 py-2 text-[14px] text-body hover:border-ink hover:text-ink"
+                  >
+                    removing <span className="font-semibold">{h.label}</span>{" "}
+                    shows {h.count} {h.count === 1 ? "listing" : "listings"}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       ) : (
         <ul className="divide-y divide-hairline-soft">

@@ -71,6 +71,31 @@ describe('postgres SearchService', () => {
     expect(r.listings.length).toBeLessThanOrEqual(500)
   })
 
+  it('offers single-filter relaxation hints on zero results', async () => {
+    // Seed corpus has no furnished listings: furnished:true zeroes any query.
+    const p: ParsedQuery = {
+      ...parseQueryKeywords('1 bed under $2000 near lake eola'),
+      furnished: true,
+    }
+    const svc = createSearchService(() => pool, { parse: async () => p })
+    const r = await svc.search('furnished 1br near Lake Eola under $2,000')
+    expect(r.totalCount).toBe(0)
+    expect(r.relaxationHints.length).toBeGreaterThanOrEqual(1)
+    const furnishedHint = r.relaxationHints.find((h) => h.drop === 'furnished')!
+    expect(furnishedHint.count).toBeGreaterThanOrEqual(1)
+    expect(furnishedHint.label).toMatch(/Furnished/)
+    expect(furnishedHint.suggestedQuery).not.toMatch(/furnished/i)
+    // Only productive drops appear, sorted by count descending.
+    for (const h of r.relaxationHints) expect(h.count).toBeGreaterThan(0)
+    const counts = r.relaxationHints.map((h) => h.count)
+    expect([...counts].sort((a, b) => b - a)).toEqual(counts)
+  })
+
+  it('returns no hints when results exist', async () => {
+    const r = await service().search('1 bed')
+    expect(r.relaxationHints).toEqual([])
+  })
+
   it('applies shortTerm=false as a hard filter', async () => {
     const p: ParsedQuery = {
       ...parseQueryKeywords(''),

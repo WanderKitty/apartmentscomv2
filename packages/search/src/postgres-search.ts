@@ -251,6 +251,69 @@ function collapseDuplicates(listings: Listing[]): Listing[] {
   return out
 }
 
+// One COUNT sharing SEARCH_SQL's exact WHERE clause — used only on the
+// zero-results path to compute single-filter relaxation hints.
+const COUNT_MATCHING_SQL = `
+SELECT count(*)::int AS n
+FROM listings l
+JOIN units u ON u.id = l.unit_id
+JOIN properties p ON p.id = l.property_id
+WHERE l.status = 'active'
+  AND ($1::int IS NULL OR l.price_cents IS NULL OR l.price_cents <= $1)
+  AND ($2::int IS NULL OR u.beds >= $2)
+  AND ($3::boolean IS NULL OR (l.furnished IS TRUE) = $3)
+  AND ($4::boolean IS NULL OR
+       (CASE WHEN $4 THEN l.lease_term IN ('short','both')
+             ELSE l.lease_term IN ('long','unknown') END))
+  AND (cardinality($5::text[]) = 0 OR (u.amenities || p.amenities) @> $5::text[])
+  AND (cardinality($6::text[]) = 0 OR EXISTS (
+        SELECT 1 FROM neighborhoods nh2
+        WHERE nh2.name = ANY($6::text[]) AND ST_Covers(nh2.boundary, l.location)))
+  AND ($7 = '' OR l.search_tsv @@ plainto_tsquery('english', $7))
+`
+
+const searchParams = (p: ParsedQuery) => [
+  p.priceMax === null ? null : p.priceMax * 100,
+  p.bedsMin,
+  p.furnished,
+  p.shortTerm,
+  p.amenities,
+  p.neighborhoods,
+  p.residualText,
+]
+
+type DropCandidate = { drop: string; label: string; strip: (p: ParsedQuery) => ParsedQuery }
+
+function activeDrops(p: ParsedQuery): DropCandidate[] {
+  const out: DropCandidate[] = []
+  if (p.neighborhoods.length > 0)
+    out.push({ drop: 'neighborhoods', label: p.neighborhoods.join(', '), strip: (q) => ({ ...q, neighborhoods: [] }) })
+  if (p.priceMax !== null)
+    out.push({ drop: 'priceMax', label: `Under $${p.priceMax.toLocaleString('en-US')}`, strip: (q) => ({ ...q, priceMax: null }) })
+  if (p.bedsMin !== null)
+    out.push({ drop: 'bedsMin', label: p.bedsMin === 0 ? 'Studio' : `${p.bedsMin}+ bd`, strip: (q) => ({ ...q, bedsMin: null }) })
+  if (p.furnished !== null)
+    out.push({ drop: 'furnished', label: p.furnished ? 'Furnished' : 'Unfurnished', strip: (q) => ({ ...q, furnished: null }) })
+  if (p.shortTerm !== null)
+    out.push({ drop: 'shortTerm', label: 'Short term', strip: (q) => ({ ...q, shortTerm: null }) })
+  for (const a of p.amenities)
+    out.push({ drop: `amenity:${a}`, label: a, strip: (q) => ({ ...q, amenities: q.amenities.filter((x) => x !== a) }) })
+  return out
+}
+
+/** Lossy natural-query reconstruction from the remaining filters. */
+function rebuildQuery(p: ParsedQuery): string {
+  const parts: string[] = []
+  if (p.bedsMin !== null) parts.push(p.bedsMin === 0 ? 'studio' : `${p.bedsMin}br`)
+  if (p.neighborhoods.length > 0) parts.push(`in ${p.neighborhoods[0]}`)
+  if (p.priceMax !== null) parts.push(`under $${p.priceMax}`)
+  parts.push(...p.amenities)
+  if (p.furnished === true) parts.push('furnished')
+  if (p.furnished === false) parts.push('unfurnished')
+  if (p.shortTerm === true) parts.push('short term')
+  return parts.join(' ').trim() || p.residualText
+}
+
 const recentSearchMs: number[] = []
 function recordP50(ms: number): number {
   recentSearchMs.push(ms)
@@ -271,15 +334,7 @@ export function createSearchService(
       const parsed = await parse(rawQuery)
       const t0 = performance.now()
       const [{ rows }, corpusRes] = await Promise.all([
-        pool.query<Row>(SEARCH_SQL, [
-          parsed.priceMax === null ? null : parsed.priceMax * 100,
-          parsed.bedsMin,
-          parsed.furnished,
-          parsed.shortTerm,
-          parsed.amenities,
-          parsed.neighborhoods,
-          parsed.residualText,
-        ]),
+        pool.query<Row>(SEARCH_SQL, searchParams(parsed)),
         pool.query<{ seed: number; scraped: number }>(
           `SELECT count(*) FILTER (WHERE provenance = 'seed')::int AS seed,
                   count(*) FILTER (WHERE provenance = 'scraped')::int AS scraped
@@ -287,6 +342,26 @@ export function createSearchService(
         ),
       ])
       const collapsed = collapseDuplicates(rows.map((r) => rowToListing(r, now)))
+      // Zero results with active filters: tell the visitor which SINGLE
+      // filter removal would unlock listings — transparency-as-UX, same
+      // ethos as the parse echo. Costs queries only on the empty path.
+      let relaxationHints: SearchResult['relaxationHints'] = []
+      if (collapsed.length === 0) {
+        const drops = activeDrops(parsed)
+        if (drops.length > 0) {
+          const counted = await Promise.all(
+            drops.map(async (d) => {
+              const stripped = d.strip(parsed)
+              const { rows: c } = await pool.query<{ n: number }>(COUNT_MATCHING_SQL, searchParams(stripped))
+              return { drop: d.drop, label: d.label, count: c[0]!.n, suggestedQuery: rebuildQuery(stripped) }
+            }),
+          )
+          relaxationHints = counted
+            .filter((h) => h.count > 0)
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 4)
+        }
+      }
       const searchMs = Math.round((performance.now() - t0) * 100) / 100
       // Spec §6.1: every parse is logged. Awaited for determinism (the
       // insert is sub-ms at this scale) but a logging failure must never
@@ -304,6 +379,7 @@ export function createSearchService(
         listings: collapsed,
         parsed,
         totalCount: collapsed.length,
+        relaxationHints,
         timing: {
           parseMs: parsed.parseMs,
           searchMs,
