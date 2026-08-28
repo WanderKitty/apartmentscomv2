@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import Link from "next/link";
 import { NavLinks } from "@/components/NavLinks";
@@ -12,6 +12,14 @@ const inter = Inter({
   variable: "--font-inter",
   display: "swap",
 });
+
+// The design system is deliberately light-only (the reference has no dark
+// mode on the public web). Declaring it stops Chrome's Auto Dark Mode
+// from force-inverting the page — which crushed the light-gray loading
+// skeletons into invisible dark-on-dark.
+export const viewport: Viewport = {
+  colorScheme: "only light",
+};
 
 export const metadata: Metadata = {
   title: "Eola — Orlando apartment search",
