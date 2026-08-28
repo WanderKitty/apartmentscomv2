@@ -189,6 +189,7 @@ function rowToListing(row: Row, now: Date): Listing {
     propertyId: row.collapse_key,
     propertyName: row.property_name,
     neighborhood: row.neighborhood_name ?? '',
+    city: row.city,
     address: `${row.address_line1}, ${row.city}, ${row.state} ${row.zip}`,
     beds: row.beds,
     baths: row.baths,

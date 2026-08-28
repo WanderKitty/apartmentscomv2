@@ -43,6 +43,21 @@ describe("ListingCard", () => {
     );
   });
 
+  it("falls back to the city when neighborhood is empty, with no dangling separator", () => {
+    const camellia = byId("seed___u0001");
+    const listing = { ...camellia, neighborhood: "", city: "Tampa" };
+    render(<ListingCard listing={listing} now={NOW} />);
+    const nameLine = screen.getByText(/The Camellia at Lake Eola/);
+    expect(nameLine.textContent).toBe("The Camellia at Lake Eola · Tampa");
+  });
+
+  it("keeps showing the neighborhood, unchanged, when it is non-empty", () => {
+    const camellia = byId("seed___u0001");
+    render(<ListingCard listing={camellia} now={NOW} />);
+    const nameLine = screen.getByText(/The Camellia at Lake Eola/);
+    expect(nameLine.textContent).toBe("The Camellia at Lake Eola · Lake Eola Heights");
+  });
+
   it("hides score components unless debug is on", () => {
     const { rerender } = render(
       <ListingCard listing={byId("seed___u0001")} now={NOW} />,

@@ -40,6 +40,8 @@ export interface Listing {
   propertyId: string;
   propertyName: string;
   neighborhood: string;
+  /** Display fallback when neighborhood is empty (Plan 6 Task 4). */
+  city: string;
   address: string;
   beds: number; // 0 = studio
   baths: number;
