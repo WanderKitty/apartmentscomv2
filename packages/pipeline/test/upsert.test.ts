@@ -148,6 +148,70 @@ describe('ingestion helpers', () => {
     expect(again.rows[0].price_changes).toBe(1)
   })
 
+  it('a price increase appends kind price_increase with correct from/to', async () => {
+    const base = {
+      ...buildSeedUnits(NOW)[0]!,
+      source_id: 'entrata___priceinc-1',
+      collapse_key: 'entrata:priceinc-1',
+      liberal_dedup_cluster: 'orlando:priceinc-1',
+      platform: 'entrata' as const,
+      data_provenance: 'scraped' as const,
+      advertised_rent_cents: 150000,
+      net_effective_monthly_cents: null,
+      concession_type: 'not_mentioned' as const,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: 150000, note: null }],
+    }
+    await upsertProcessedUnits(pool, [base])
+    // Second scrape cycle: rent went up $120.
+    await upsertProcessedUnits(pool, [{
+      ...base,
+      advertised_rent_cents: 162000,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: 162000, note: null }],
+    }])
+    const { rows } = await pool.query(
+      `SELECT price_cents, events, price_history, price_changes FROM listings WHERE collapse_key = 'entrata:priceinc-1'`,
+    )
+    const r = rows[0]
+    expect(r.price_cents).toBe(162000)
+    const priceEvents = r.events.filter((e: { kind: string }) => e.kind === 'price_drop' || e.kind === 'price_increase')
+    expect(priceEvents).toHaveLength(1)
+    expect(priceEvents[0]).toMatchObject({ kind: 'price_increase', from_cents: 150000, to_cents: 162000 })
+    expect(r.price_history).toHaveLength(1)
+    expect(r.price_history[0]).toMatchObject({ from_cents: 150000, to_cents: 162000 })
+    expect(r.price_changes).toBe(1)
+  })
+
+  it('a null-to-non-null price transition appends nothing but still updates price_cents', async () => {
+    const base = {
+      ...buildSeedUnits(NOW)[0]!,
+      source_id: 'entrata___pricenull-1',
+      collapse_key: 'entrata:pricenull-1',
+      liberal_dedup_cluster: 'orlando:pricenull-1',
+      platform: 'entrata' as const,
+      data_provenance: 'scraped' as const,
+      advertised_rent_cents: null,
+      net_effective_monthly_cents: null,
+      concession_type: 'not_mentioned' as const,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: null, note: null }],
+    }
+    await upsertProcessedUnits(pool, [base])
+    // Second scrape cycle: price becomes known — the null→non-null edge is unclassifiable, not a "change".
+    await upsertProcessedUnits(pool, [{
+      ...base,
+      advertised_rent_cents: 175000,
+      events: [{ at: NOW.toISOString(), kind: 'first_listed' as const, from_cents: null, to_cents: 175000, note: null }],
+    }])
+    const { rows } = await pool.query(
+      `SELECT price_cents, events, price_history, price_changes FROM listings WHERE collapse_key = 'entrata:pricenull-1'`,
+    )
+    const r = rows[0]
+    expect(r.price_cents).toBe(175000)
+    const priceEvents = r.events.filter((e: { kind: string }) => e.kind === 'price_drop' || e.kind === 'price_increase')
+    expect(priceEvents).toHaveLength(0)
+    expect(r.price_history).toHaveLength(0)
+    expect(r.price_changes).toBe(0)
+  })
+
   it('bumpConfirmed and sweepVanished implement the confirm/stale/gone ladder', async () => {
     const { rows: src } = await pool.query(`SELECT id FROM sources WHERE website_url = 'https://example.com/spatial'`)
     const ref = src[0].id

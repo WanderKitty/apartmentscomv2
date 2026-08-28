@@ -29,7 +29,7 @@ for (const source of sources) {
   try {
     const scrape = await runScrape(pool, { fetcher }, source.id)
     if (scrape.snapshotId !== null) {
-      const processed = await runProcess(pool, { llm }, { snapshotId: scrape.snapshotId, sourceId: source.id })
+      const processed = await runProcess(pool, { llm }, { snapshotId: scrape.snapshotId, sourceId: source.id, runId: scrape.runId })
       console.log(`[scrape-all] ${source.name} (#${source.id}): unchanged=${scrape.unchanged} upserted=${processed.upserted} failures=${processed.failures}`)
     } else {
       console.log(`[scrape-all] ${source.name} (#${source.id}): unchanged=${scrape.unchanged}`)

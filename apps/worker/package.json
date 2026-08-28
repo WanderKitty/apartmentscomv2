@@ -13,7 +13,6 @@
     "@aptv2/db": "workspace:*",
     "@aptv2/pipeline": "workspace:*",
     "@aptv2/scrapers": "workspace:*",
-    "@aptv2/schema": "workspace:*",
     "pg": "^8.13.0",
     "pg-boss": "^10.1.0"
   },

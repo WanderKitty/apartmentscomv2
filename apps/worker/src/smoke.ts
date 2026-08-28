@@ -1,6 +1,6 @@
 import { config } from 'dotenv'
 import { fileURLToPath } from 'node:url'
-import { getPool } from '@aptv2/db'
+import { closePool, getPool } from '@aptv2/db'
 import { createHaikuEnricher } from '@aptv2/pipeline'
 import { createPoliteFetcher, isPathAllowed } from '@aptv2/scrapers'
 import { runProcess, runScrape } from './jobs/scrape'
@@ -33,14 +33,16 @@ try {
     : 'no robots.txt policy stored (treated as allowed)'
   console.log(`[smoke] robots decision for ${endpointUrl}: ${decision}`)
 
+  // id DESC (not fetched_at DESC) — id is the unambiguous monotonic order;
+  // two snapshots can share a fetched_at timestamp.
   const { rows: snapRows } = await pool.query(
-    `SELECT id, content_hash FROM raw_snapshots WHERE source_id = $1 ORDER BY fetched_at DESC LIMIT 1`, [sourceId],
+    `SELECT id, content_hash FROM raw_snapshots WHERE source_id = $1 ORDER BY id DESC LIMIT 1`, [sourceId],
   )
   const snap = snapRows[0]
   console.log(`[smoke] snapshot id=${snap.id} hash=${snap.content_hash} unchanged=${scrape.unchanged}`)
 
   if (scrape.snapshotId !== null) {
-    const processed = await runProcess(pool, { llm }, { snapshotId: scrape.snapshotId, sourceId })
+    const processed = await runProcess(pool, { llm }, { snapshotId: scrape.snapshotId, sourceId, runId: scrape.runId })
     console.log(`[smoke] processed: upserted=${processed.upserted} failures=${processed.failures}`)
   } else {
     console.log('[smoke] unchanged payload — nothing to process')
@@ -52,6 +54,9 @@ try {
   )
   console.log('[smoke] top-3 listings:')
   for (const r of top) console.log(`  - ${r.name ?? '(unnamed)'} · ${r.beds ?? '?'} bed · ${r.price_cents ?? 'n/a'}c`)
+  // The live pool otherwise holds the event loop open forever — exit explicitly.
+  await closePool()
+  process.exit(0)
 } catch (e) {
   console.error('[smoke] FAILED:', (e as Error).message)
   process.exit(1)

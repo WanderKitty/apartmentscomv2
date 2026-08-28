@@ -156,6 +156,12 @@ export async function upsertProcessedUnits(
          furnished = EXCLUDED.furnished,
          status = EXCLUDED.status,
          last_confirmed_at = EXCLUDED.last_confirmed_at,
+         -- Non-price EXCLUDED events are intentionally dropped today: this
+         -- run's freshly-synthesized events array is discarded wholesale
+         -- unless it reflects a price change (extraction currently only
+         -- ever emits a single 'first_listed' event per run). If extraction
+         -- starts emitting other event kinds (e.g. availability changes),
+         -- those must be merged in here too, not just the price delta.
          events = CASE WHEN ${priceChangedCase} THEN listings.events || jsonb_build_array(${appendedEvent}) ELSE listings.events END,
          price_history = ${newPriceHistoryExpr},
          price_changes = jsonb_array_length(${newPriceHistoryExpr}),
@@ -165,7 +171,7 @@ export async function upsertProcessedUnits(
          move_in_fees = EXCLUDED.move_in_fees,
          concession = EXCLUDED.concession,
          description = EXCLUDED.description,
-         source_ref = EXCLUDED.source_ref`,
+         source_ref = COALESCE(EXCLUDED.source_ref, listings.source_ref)`,
       [
         unitId, propertyId, neighborhoodId, u.longitude, u.latitude,
         u.advertised_rent_cents, u.price_level === 'floorplan_starting_at',

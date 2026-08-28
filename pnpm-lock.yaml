@@ -86,9 +86,6 @@ importers:
       '@aptv2/pipeline':
         specifier: workspace:*
         version: link:../../packages/pipeline
-      '@aptv2/schema':
-        specifier: workspace:*
-        version: link:../../packages/schema
       '@aptv2/scrapers':
         specifier: workspace:*
         version: link:../../packages/scrapers
