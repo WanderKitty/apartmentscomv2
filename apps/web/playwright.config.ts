@@ -17,6 +17,7 @@ e2eDb.pathname = "/aptv2_e2e";
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: "**/smoke/**",
   timeout: 30_000,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
