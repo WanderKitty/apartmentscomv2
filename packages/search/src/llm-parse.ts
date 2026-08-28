@@ -1,14 +1,16 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { AMENITY_KEYWORDS, NEIGHBORHOOD_ALIASES, type ParsedQuery } from "@aptv2/schema";
+import { AMENITY_KEYWORDS, FLORIDA_CITIES, NEIGHBORHOOD_ALIASES, type ParsedQuery } from "@aptv2/schema";
 import { parseQueryKeywords } from "./keyword-parse";
 
 const NEIGHBORHOODS = Object.keys(NEIGHBORHOOD_ALIASES) as [string, ...string[]];
 const AMENITIES = Object.keys(AMENITY_KEYWORDS) as [string, ...string[]];
+const CITIES = [...FLORIDA_CITIES] as [string, ...string[]];
 
 const LlmParseSchema = z.object({
   neighborhoods: z.array(z.enum(NEIGHBORHOODS)),
+  cities: z.array(z.enum(CITIES)),
   price_max_dollars: z.number().int().positive().nullable(),
   beds_min: z.number().int().min(0).max(6).nullable(),
   beds_max: z.number().int().min(0).max(6).nullable(),
@@ -18,7 +20,7 @@ const LlmParseSchema = z.object({
   residual_text: z.string(),
 });
 
-const SYSTEM = `You convert one apartment-search query into filters. Extract ONLY constraints the user actually stated; use null for anything not stated. Neighborhoods must come from this exact list (map colloquial names onto them, e.g. "near lake eola" → "Lake Eola Heights"): ${NEIGHBORHOODS.join("; ")}. Amenities must come from this exact list: ${AMENITIES.join("; ")}. Bedrooms: a plain count means EXACTLY that many — "2br"/"two bed" → beds_min 2 AND beds_max 2; "studio" → beds_min 0 AND beds_max 0; only an open-ended phrasing ("2+", "at least 2", "2 or more") sets beds_min 2 with beds_max null. Put any leftover free text that expresses a real constraint you could not map into residual_text, else "".`;
+const SYSTEM = `You convert one apartment-search query into filters. Extract ONLY constraints the user actually stated; use null for anything not stated. Neighborhoods must come from this exact list (map colloquial names onto them, e.g. "near lake eola" → "Lake Eola Heights"): ${NEIGHBORHOODS.join("; ")}. Cities must come from this exact list: ${CITIES.join("; ")}. A city name is a city filter; neighborhood names take precedence when both could match (e.g. "downtown orlando" is the Downtown Orlando neighborhood, not also the city Orlando). Amenities must come from this exact list: ${AMENITIES.join("; ")}. Bedrooms: a plain count means EXACTLY that many — "2br"/"two bed" → beds_min 2 AND beds_max 2; "studio" → beds_min 0 AND beds_max 0; only an open-ended phrasing ("2+", "at least 2", "2 or more") sets beds_min 2 with beds_max null. Put any leftover free text that expresses a real constraint you could not map into residual_text, else "".`;
 
 // Spec §6.1 budgets 800ms; the demo uses a looser 2500ms so a cold Haiku
 // round-trip lands as "llm" rather than falling open mid-demo.
@@ -76,6 +78,7 @@ export async function parseQueryWith(
     if (!out) return fallback();
     const parsed: ParsedQuery = {
       neighborhoods: out.neighborhoods,
+      cities: out.cities,
       priceMax: out.price_max_dollars,
       bedsMin: out.beds_min,
       bedsMax: out.beds_max,
@@ -92,7 +95,7 @@ export async function parseQueryWith(
   } catch {
     return fallback(); // timeout, network, refusal, anything → keyword rung
   } finally {
-    if (timer) clearTimeout(timer); // A6: never leave the race's timer live
+    if (timer) clearTimeout(timer); // never leave the race's timer live
   }
 }
 

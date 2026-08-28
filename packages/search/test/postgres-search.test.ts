@@ -228,4 +228,56 @@ describe('postgres SearchService', () => {
     expect(l!.trueCost!.concessionMonthly).toBe(200)
     expect(l!.trueCost!.netEffectiveMonthly).toBe(1300)
   })
+
+  it('city filter matches a Tampa listing, excludes Orlando, and combines with beds', async () => {
+    const tampa2Bed = ProcessedUnitDataSchema.parse({
+      ...minimalUnit(),
+      source_id: `entrata${SOURCE_ID_SEPARATOR}tampa-2bed-test`,
+      platform: 'entrata',
+      collapse_key: 'entrata:tampa-2bed-test',
+      liberal_dedup_cluster: 'tampa:tampa-2bed-test-unit',
+      source_url: 'https://example.com/tampa-2bed-test',
+      data_provenance: 'scraped',
+      property_name: 'Tampa Test Property',
+      address_line1: '1 Tampa Test Way',
+      city: 'Tampa', state: 'FL', zip: '33602',
+      neighborhood: '',
+      latitude: 27.9506, longitude: -82.4572,
+      beds: 2, baths: 2,
+      advertised_rent_cents: 180000,
+      price_level: 'unit', is_price_transparent: true,
+      first_seen_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(),
+    })
+    const tampa1Bed = ProcessedUnitDataSchema.parse({
+      ...minimalUnit(),
+      source_id: `entrata${SOURCE_ID_SEPARATOR}tampa-1bed-test`,
+      platform: 'entrata',
+      collapse_key: 'entrata:tampa-1bed-test',
+      liberal_dedup_cluster: 'tampa:tampa-1bed-test-unit',
+      source_url: 'https://example.com/tampa-1bed-test',
+      data_provenance: 'scraped',
+      property_name: 'Tampa Test Property',
+      address_line1: '1 Tampa Test Way',
+      city: 'Tampa', state: 'FL', zip: '33602',
+      neighborhood: '',
+      latitude: 27.9506, longitude: -82.4572,
+      beds: 1, baths: 1,
+      advertised_rent_cents: 150000,
+      price_level: 'unit', is_price_transparent: true,
+      first_seen_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(),
+    })
+    await upsertProcessedUnits(pool, [tampa2Bed, tampa1Bed])
+
+    const r = await service().search('2br in tampa')
+    expect(r.parsed.cities).toEqual(['Tampa'])
+    expect(r.parsed.neighborhoods).toEqual([])
+    expect(r.totalCount).toBeGreaterThanOrEqual(1)
+    for (const l of r.listings) {
+      expect(l.address).toMatch(/Tampa/)
+      expect(l.beds).toBe(2) // combines with the exact-bed hard filter
+    }
+    expect(r.listings.some((l) => l.propertyName === 'Tampa Test Property' && l.beds === 2)).toBe(true)
+    expect(r.listings.some((l) => l.beds === 1)).toBe(false) // Tampa 1bd excluded by beds
+    expect(r.listings.every((l) => !l.address.includes('Orlando'))).toBe(true)
+  })
 })
