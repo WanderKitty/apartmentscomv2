@@ -26,12 +26,12 @@ describe('sources seed', () => {
     }
   })
 
-  it('marks the still-unhandled embedded variant (Knightsbridge) as disabled, all others enabled', () => {
+  it('marks all seeded sources enabled — every known embedded shape (v1, v2, rentpress) now has an extractor', () => {
     const byName = Object.fromEntries(SOURCES_SEED.map((s) => [s.name, s.enabled]))
     expect(byName['Current Orlando']).toBe(true)
     expect(byName['Society Orlando']).toBe(true)
     expect(byName['Aperture']).toBe(true)
-    expect(byName['Knightsbridge at Stoneybrook']).toBe(false)
+    expect(byName['Knightsbridge at Stoneybrook']).toBe(true)
   })
 
   it('seeds idempotently by website_url, including the enabled flag', async () => {
@@ -43,7 +43,7 @@ describe('sources seed', () => {
     const byName = Object.fromEntries(rows.map((r) => [r.name, r.enabled]))
     expect(byName['Current Orlando']).toBe(true)
     expect(byName['Aperture']).toBe(true)
-    expect(byName['Knightsbridge at Stoneybrook']).toBe(false)
+    expect(byName['Knightsbridge at Stoneybrook']).toBe(true)
   })
 
   it('an ops-decided manual disable survives a reseed (ON CONFLICT must not overwrite enabled)', async () => {

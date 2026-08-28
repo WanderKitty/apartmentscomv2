@@ -38,6 +38,12 @@ function decodeV2Entities(s: string): string {
 }
 const embeddedV2Payload = JSON.parse(decodeV2Entities(embeddedV2Html.match(/:floor_plans='([^']*)'/)![1]!))
 
+const rentpressHtml = readFileSync(
+  fileURLToPath(new URL('../../scrapers/fixtures/entrata-rentpress.html', import.meta.url)),
+  'utf8',
+)
+const rentpressPayload = JSON.parse(decodeV2Entities(rentpressHtml.match(/data-floorplans='([^']*)'/)![1]!))
+
 const NOW = new Date('2026-08-27T12:00:00.000Z')
 const SOURCE: SourceRow = {
   id: 1, platform: 'entrata', name: 'Fixture Community', website_url: 'https://example.com',
@@ -72,6 +78,17 @@ const APERTURE_SOURCE: SourceRow = {
   },
   robots_policy: null, rate_limit_rps: 1,
 }
+const KNIGHTSBRIDGE_SOURCE: SourceRow = {
+  id: 4, platform: 'entrata', name: 'Knightsbridge Fixture', website_url: 'https://www.liveatknightsbridge.com',
+  endpoint_config: {
+    endpoint_url: 'https://www.liveatknightsbridge.com/floor-plans/',
+    property: {
+      name: 'Knightsbridge Fixture', address_line1: '2802 Cheval St', city: 'Orlando',
+      state: 'FL', zip: '32828', latitude: 28.514, longitude: -81.178,
+    },
+  },
+  robots_policy: null, rate_limit_rps: 1,
+}
 
 let pool: Pool
 beforeAll(async () => {
@@ -89,6 +106,10 @@ beforeAll(async () => {
     `INSERT INTO sources (platform, name, website_url) VALUES ('entrata', 'Aperture Fixture', 'https://apertureorlando.com') RETURNING id`,
   )
   APERTURE_SOURCE.id = rows3[0].id
+  const { rows: rows4 } = await pool.query(
+    `INSERT INTO sources (platform, name, website_url) VALUES ('entrata', 'Knightsbridge Fixture', 'https://www.liveatknightsbridge.com') RETURNING id`,
+  )
+  KNIGHTSBRIDGE_SOURCE.id = rows4[0].id
 })
 afterAll(async () => {
   await pool.end()
@@ -141,6 +162,25 @@ describe('extractSnapshot', () => {
       ProcessedUnitDataSchema.parse(u)
       expect(u.source_url.startsWith('https://apertureorlando.com/')).toBe(true)
       expect(u.platform).toBe('entrata')
+    }
+  })
+
+  // CRITICAL regression coverage: the rentpress shape's unit_available_on
+  // arrives as "M/D/YYYY" ("8/6/2026"), not ISO — before the normalization
+  // shim, every one of these 37 units failed ProcessedUnitDataSchema's
+  // `available_on: z.string().date()`.
+  it('produces 37 schema-valid records from the rentpress embedded-shape fixture (Knightsbridge), absolute source_urls', async () => {
+    const { units, failures } = await extractSnapshot(pool, {
+      snapshot: { id: 70, source_id: KNIGHTSBRIDGE_SOURCE.id, payload: rentpressPayload },
+      source: KNIGHTSBRIDGE_SOURCE, now: NOW, llm: null,
+    })
+    expect(failures).toEqual([])
+    expect(units.length).toBe(37)
+    for (const u of units) {
+      ProcessedUnitDataSchema.parse(u)
+      expect(u.source_url.startsWith('https://www.liveatknightsbridge.com/')).toBe(true)
+      expect(u.platform).toBe('entrata')
+      expect(u.available_on).toMatch(/^\d{4}-\d{2}-\d{2}$/) // normalized to ISO, not the source's "M/D/YYYY"
     }
   })
 

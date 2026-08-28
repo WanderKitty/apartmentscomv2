@@ -95,6 +95,14 @@ function embeddedV1Html(ldJson: string, unitsJson: string) {
   return `<html><head></head><body>${ldJson}<script type="application/json" id="jd-fp-data-script-app">${unitsJson}</script></body></html>`
 }
 
+// rentpressFloorplansJson must already be entity-encoded (&quot; for `"`,
+// single-quoted attribute) — the real shape, per entrata.ts's rentpress
+// section and fixtures/README.md's Knightsbridge provenance.
+function embeddedRentpressHtml(ldJson: string, rentpressFloorplansJson: string) {
+  return `<html><head></head><body>${ldJson}<div id='rentpress-app' data-floorplans='${rentpressFloorplansJson}'></div></body></html>`
+}
+const VALID_RENTPRESS_FLOORPLANS = '[{&quot;floorplan_code&quot;:&quot;1_A1&quot;,&quot;floorplan_post_title&quot;:&quot;A1&quot;,&quot;units&quot;:[{&quot;unit_code&quot;:&quot;1_A1_101&quot;,&quot;unit_name&quot;:&quot;101&quot;,&quot;unit_bedrooms&quot;:&quot;1&quot;,&quot;unit_bathrooms&quot;:&quot;1&quot;}]}]'
+
 describe('verifyCandidate', () => {
   it('robots disallowing the homepage → not_public, with exactly the mandated phrase and nothing more', async () => {
     const fetcher = fakeFetcher({
@@ -272,6 +280,32 @@ describe('verifyCandidate', () => {
     const { rows } = await pool.query(`SELECT * FROM sources WHERE website_url = $1`, ['https://embedded-example.com/'])
     expect(rows[0].endpoint_config.mode).toBe('embedded-v1')
     expect(rows[0].endpoint_config.endpoint_url).toBe('https://embedded-example.com/')
+  })
+
+  it('full happy path (rentpress mode, no separate endpoint request — same pattern as the other embedded modes) → registered', async () => {
+    const html = embeddedRentpressHtml(ORLANDO_LD_JSON, VALID_RENTPRESS_FLOORPLANS)
+    const fetcher = fakeFetcher({
+      'https://rentpress-example.com/robots.txt': PERMISSIVE_ROBOTS,
+      'https://rentpress-example.com/': { status: 200, text: html },
+    })
+    const result = await verifyCandidate({ url: 'https://rentpress-example.com/', metro: 'Orlando' }, fetcher, { pool })
+    expect(result.verdict).toBe('registered')
+
+    const { rows } = await pool.query(`SELECT * FROM sources WHERE website_url = $1`, ['https://rentpress-example.com/'])
+    expect(rows[0].endpoint_config.mode).toBe('rentpress')
+    // The probe IS the floor-plans page itself, like the other embedded
+    // modes — no extra endpoint request, unlike REST mode.
+    expect(rows[0].endpoint_config.endpoint_url).toBe('https://rentpress-example.com/')
+  })
+
+  it('rentpress fingerprint found but the embedded JSON has no units array on a floorplan record → no_endpoint', async () => {
+    const html = embeddedRentpressHtml(ORLANDO_LD_JSON, '[{&quot;floorplan_code&quot;:&quot;1_A1&quot;}]')
+    const fetcher = fakeFetcher({
+      'https://rentpress-noendpoint.example.com/robots.txt': NO_ROBOTS_FILE,
+      'https://rentpress-noendpoint.example.com/': { status: 200, text: html },
+    })
+    const result = await verifyCandidate({ url: 'https://rentpress-noendpoint.example.com/', metro: 'Orlando' }, fetcher, { pool })
+    expect(result.verdict).toBe('no_endpoint')
   })
 
   it('is idempotent by website_url: re-verifying an already-registered candidate does not insert a duplicate row', async () => {
