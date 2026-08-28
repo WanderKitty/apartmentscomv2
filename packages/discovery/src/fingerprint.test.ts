@@ -75,6 +75,13 @@ describe('fingerprintEntrata', () => {
     expect(result.endpointPath).toBeNull()
   })
 
+  it('self-documents the no-misfire guarantee: v1 and v2 snippets never resolve to rentpress mode', () => {
+    expect(fingerprintEntrata(EMBEDDED_V1_SNIPPET).mode).not.toBe('rentpress')
+    expect(fingerprintEntrata(EMBEDDED_V1_SNIPPET).mode).toBe('embedded-v1')
+    expect(fingerprintEntrata(EMBEDDED_V2_SNIPPET).mode).not.toBe('rentpress')
+    expect(fingerprintEntrata(EMBEDDED_V2_SNIPPET).mode).toBe('embedded-v2')
+  })
+
   it('returns isEntrata false with no mode for non-Entrata HTML', () => {
     const result = fingerprintEntrata(PLAIN_HTML)
     expect(result.isEntrata).toBe(false)

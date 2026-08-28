@@ -262,6 +262,29 @@ describe('parseEntrataPayload (golden, rentpress shape — Knightsbridge capture
   it('throws a named error when the floorplan record has no units array', () => {
     expect(() => parseEntrataPayload([{ floorplan_code: 'x' }])).toThrow(EntrataPayloadError)
   })
+
+  it('a malformed, missing, or garbage unit_available_on degrades to a null availableOn — never throws, the unit still extracts', () => {
+    const base = { floorplan_code: 'x', floorplan_post_title: 'X1' }
+    const makeUnit = (extra: Record<string, unknown>) => ({
+      unit_code: 'u1',
+      unit_name: '1',
+      unit_bedrooms: '1',
+      unit_bathrooms: '1',
+      ...extra,
+    })
+    // empty string
+    expect(() => parseEntrataPayload([{ ...base, units: [makeUnit({ unit_available_on: '' })] }])).not.toThrow()
+    expect(parseEntrataPayload([{ ...base, units: [makeUnit({ unit_available_on: '' })] }])[0]!.availableOn).toBeNull()
+    // key entirely absent
+    expect(() => parseEntrataPayload([{ ...base, units: [makeUnit({})] }])).not.toThrow()
+    expect(parseEntrataPayload([{ ...base, units: [makeUnit({})] }])[0]!.availableOn).toBeNull()
+    // garbage (not date-shaped at all)
+    expect(() => parseEntrataPayload([{ ...base, units: [makeUnit({ unit_available_on: 'not-a-date' })] }])).not.toThrow()
+    const garbageUnits = parseEntrataPayload([{ ...base, units: [makeUnit({ unit_available_on: 'not-a-date' })] }])
+    expect(garbageUnits.length).toBe(1) // the unit still extracts, just with a null date
+    expect(garbageUnits[0]!.availableOn).toBeNull()
+    expect(garbageUnits[0]!.externalId).toBe('u1')
+  })
 })
 
 describe('entrataAdapter', () => {
