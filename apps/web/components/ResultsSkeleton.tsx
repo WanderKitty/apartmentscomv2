@@ -1,11 +1,32 @@
 /**
- * Streaming fallback for the results block: mirrors the parse echo, the
- * count bar, and a page of photo-first cards so the layout doesn't jump
- * when real results land.
+ * Streaming fallback for the results block: a rausch progress bar and a
+ * labeled status line (hue and text survive forced-dark browser tools
+ * that crush the gray shimmer), then a page of photo-first card
+ * skeletons so the layout doesn't jump when real results land.
  */
 export function ResultsSkeleton() {
   return (
-    <div aria-hidden>
+    <div>
+      <div className="progress-track mt-6 h-1 w-full" aria-hidden>
+        <div className="progress-bar" />
+      </div>
+      <p className="mt-3 flex items-center gap-2 text-[14px] font-medium text-ink">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--color-rausch)"
+          strokeWidth="3"
+          strokeLinecap="round"
+          className="spinner"
+          aria-hidden
+        >
+          <path d="M12 2.5 A9.5 9.5 0 1 1 2.5 12" />
+        </svg>
+        Searching listings…
+      </p>
+      <div aria-hidden>
       <div className="mt-4 h-8 w-72 max-w-full rounded-full skeleton" />
 
       <div className="mt-6 flex items-baseline justify-between border-b border-hairline-soft pb-3">
@@ -28,6 +49,7 @@ export function ResultsSkeleton() {
           </li>
         ))}
       </ul>
+      </div>
     </div>
   );
 }
