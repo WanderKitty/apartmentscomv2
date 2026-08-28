@@ -218,7 +218,10 @@ function extractEmbeddedJson(html: string): unknown {
 export const entrataAdapter: Adapter = {
   platform: 'entrata',
   async fetch(source: SourceRow, fetcher: PoliteFetcher): Promise<RawSnapshotInput> {
-    const res = await fetcher.fetchText(source.endpoint_config.endpoint_url, source.robots_policy)
+    // rate_limit_rps is a `numeric` column — pg returns it as a string, so
+    // it must be coerced before it can drive the fetcher's per-call spacing.
+    const maxRps = Number(source.rate_limit_rps)
+    const res = await fetcher.fetchText(source.endpoint_config.endpoint_url, source.robots_policy, { maxRps })
     if (res.status !== 200) {
       throw new Error(`entrata fetch failed: HTTP ${res.status} for ${source.endpoint_config.endpoint_url}`)
     }

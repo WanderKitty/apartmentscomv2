@@ -34,10 +34,12 @@ export async function runScrape(
   const runId = run[0]!.id
   try {
     // Refresh robots policy once per run (cheap; cached in the sources row).
+    // rate_limit_rps is a `numeric` column — pg returns it as a string.
+    const maxRps = Number(source.rate_limit_rps)
     let policy = source.robots_policy
     try {
       const origin = new URL(source.website_url).origin
-      const res = await deps.fetcher.fetchText(`${origin}/robots.txt`, null)
+      const res = await deps.fetcher.fetchText(`${origin}/robots.txt`, null, { maxRps })
       if (res.status === 200) policy = parseRobots(res.body, 'aptv2-research-bot')
     } catch (e) {
       // Robots fetch failure keeps the stored policy — recorded below either way.
@@ -46,24 +48,34 @@ export async function runScrape(
     // The adapter fetch MUST be gated by the policy we just refreshed, not
     // the stale row loaded above — otherwise a first-ever scrape (stored
     // policy null) runs ungated, and a newly published Disallow/Crawl-delay
-    // is ignored for a full cycle (review CRITICAL 1).
+    // is ignored for a full cycle.
     source.robots_policy = policy
 
     const snap = await entrataAdapter.fetch(source, deps.fetcher)
+    // Only a FULLY processed prior snapshot licenses the short-circuit: a
+    // 'partial' match means the last look at this exact content missed some
+    // units, so identical content must be given another chance to extract
+    // cleanly rather than being waved through as "already seen" (prod
+    // incident 2026-08-28).
     const { rows: dup } = await pool.query(
-      `SELECT 1 FROM raw_snapshots WHERE source_id = $1 AND content_hash = $2 LIMIT 1`,
+      `SELECT id FROM raw_snapshots WHERE source_id = $1 AND content_hash = $2 AND processing_status = 'processed' LIMIT 1`,
       [sourceId, snap.content_hash],
     )
     const unchanged = dup.length > 0
+    // Storage economy: an unchanged row is an audit marker, not a second
+    // copy of the (potentially megabyte-sized) payload — it points at the
+    // matched prior snapshot instead. Replay is unaffected: only
+    // non-skipped rows are ever replayed.
+    const storedPayload = unchanged ? { unchanged_ref: dup[0]!.id } : snap.payload
     const { rows: inserted } = await pool.query(
       `INSERT INTO raw_snapshots (source_id, content_hash, payload, processing_status)
        VALUES ($1, $2, $3, $4) RETURNING id`,
-      [sourceId, snap.content_hash, JSON.stringify(snap.payload), unchanged ? 'skipped_unchanged' : 'pending'],
+      [sourceId, snap.content_hash, JSON.stringify(storedPayload), unchanged ? 'skipped_unchanged' : 'pending'],
     )
     // hash short-circuit still confirms every active listing is live; the
     // confirmed count IS this run's listings_found — leaving it at the
     // default 0 makes the admin delta read as a phantom mass-delisting on
-    // the (dominant) steady-state unchanged path (review IMPORTANT 1).
+    // the (dominant) steady-state unchanged path.
     const confirmedCount = unchanged ? await bumpConfirmed(pool, sourceId, new Date()) : null
     await pool.query(
       `UPDATE sources SET last_scraped_at = now(), failure_streak = 0, robots_policy = $2 WHERE id = $1`,
@@ -102,7 +114,7 @@ export async function runProcess(
     // A snapshot with any extraction failures (or zero extracted units) is
     // an incomplete view of what's really live — sweeping against it would
     // stale/gone listings that simply failed to parse THIS cycle, not
-    // listings that actually vanished from the source (review IMPORTANT 2).
+    // listings that actually vanished from the source.
     if (failures.length > 0 || units.length === 0) {
       console.warn(
         `[process] skipping sweepVanished for source ${data.sourceId}: ` +
@@ -112,10 +124,16 @@ export async function runProcess(
       await sweepVanished(pool, data.sourceId, units.map((u) => u.collapse_key))
     }
 
-    await pool.query(`UPDATE raw_snapshots SET processing_status = 'processed' WHERE id = $1`, [data.snapshotId])
+    // 'partial' (not 'processed') when any unit failed: the unchanged-hash
+    // short-circuit in runScrape only trusts a fully 'processed' snapshot,
+    // so identical content gets reprocessed until it extracts cleanly.
+    await pool.query(
+      `UPDATE raw_snapshots SET processing_status = $2 WHERE id = $1`,
+      [data.snapshotId, failures.length > 0 ? 'partial' : 'processed'],
+    )
 
-    // listings_changed isn't computed yet (no change-detection pass exists
-    // in this task) — always 0 for now. listings_found is the count of
+    // listings_changed isn't computed yet (no change-detection pass exists)
+    // — always 0 for now. listings_found is the count of
     // units this cycle successfully extracted (and upserted), regardless
     // of failures.
     if (failures.length > 0) {
@@ -128,7 +146,7 @@ export async function runProcess(
     } else {
       // Explicit 'ok' (not just left over from the fetch stage) so a
       // pg-boss retry that later succeeds wins the status back from a
-      // 'failed' left by an earlier crashed attempt (review IMPORTANT 2).
+      // 'failed' left by an earlier crashed attempt.
       await pool.query(
         `UPDATE scrape_runs SET listings_found = $2, listings_changed = 0, status = 'ok' WHERE id = $1`,
         [data.runId, units.length],
@@ -143,7 +161,7 @@ export async function runProcess(
     )
     // A whole-snapshot crash (e.g. payload shape error) must not leave the
     // run row 'ok' from the fetch stage — the admin page would say
-    // everything is fine while processing silently failed (review IMPORTANT 2).
+    // everything is fine while processing silently failed.
     await pool.query(
       `UPDATE scrape_runs SET status = 'failed', error = $2, finished_at = now() WHERE id = $1`,
       [data.runId, (e as Error).message],

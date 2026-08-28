@@ -162,4 +162,20 @@ describe('entrataAdapter', () => {
     }
     await expect(entrataAdapter.fetch(SOURCE, fetcher)).rejects.toThrow()
   })
+
+  it("passes the source's rate_limit_rps as the per-call maxRps, coerced from pg's numeric-as-string", async () => {
+    let seenMaxRps: number | undefined
+    const fetcher: PoliteFetcher = {
+      fetchJson: async () => {
+        throw new Error('unused')
+      },
+      fetchText: async (url, policy, opts) => {
+        seenMaxRps = opts?.maxRps
+        return { status: 200, body: JSON.stringify(restPayload) }
+      },
+    }
+    // pg returns `numeric` columns as strings — the source row here mirrors that.
+    await entrataAdapter.fetch({ ...SOURCE, rate_limit_rps: '0.5' as unknown as number }, fetcher)
+    expect(seenMaxRps).toBe(0.5)
+  })
 })

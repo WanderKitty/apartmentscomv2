@@ -71,6 +71,25 @@ describe('createPoliteFetcher', () => {
     expect(sleeps.some((ms) => ms >= 4999)).toBe(true)
   })
 
+  it('a per-call maxRps overrides the fetcher default spacing for that call', async () => {
+    const sleeps: number[] = []
+    let clock = 0
+    const { impl } = fakeFetch([{ status: 200 }, { status: 200 }])
+    // Fetcher default is the usual 1 req/s; this source is throttled to
+    // 0.5 req/s (source.rate_limit_rps), which must win for this call.
+    const f = createPoliteFetcher({
+      fetchImpl: impl,
+      now: () => clock,
+      sleep: async (ms) => {
+        sleeps.push(ms)
+        clock += ms
+      },
+    })
+    await f.fetchJson('https://example.com/a', null, { maxRps: 0.5 })
+    await f.fetchJson('https://example.com/b', null, { maxRps: 0.5 })
+    expect(sleeps.some((ms) => ms >= 1999)).toBe(true)
+  })
+
   it('a retry never sleeps shorter than the crawl-delay (review IMPORTANT 3)', async () => {
     const sleeps: number[] = []
     let clock = 0

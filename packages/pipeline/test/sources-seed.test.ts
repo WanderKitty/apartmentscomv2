@@ -45,4 +45,12 @@ describe('sources seed', () => {
     expect(byName['Aperture']).toBe(false)
     expect(byName['Knightsbridge at Stoneybrook']).toBe(false)
   })
+
+  it('an ops-decided manual disable survives a reseed (ON CONFLICT must not overwrite enabled)', async () => {
+    await seedSources(pool)
+    await pool.query(`UPDATE sources SET enabled = false WHERE name = 'Current Orlando'`)
+    await seedSources(pool)
+    const { rows } = await pool.query(`SELECT enabled FROM sources WHERE name = 'Current Orlando'`)
+    expect(rows[0].enabled).toBe(false)
+  })
 })

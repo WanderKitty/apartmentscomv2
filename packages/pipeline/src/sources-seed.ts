@@ -93,11 +93,14 @@ export async function seedSources(pool: pg.Pool): Promise<number> {
   let n = 0
   for (const s of SOURCES_SEED) {
     await pool.query(
+      // enabled is deliberately NOT overwritten on conflict: it's an ops
+      // decision (e.g. a manual disable after a source starts misbehaving)
+      // that must survive a reseed, not the seed's own default.
       `INSERT INTO sources (platform, name, website_url, endpoint_config, rate_limit_rps, enabled)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (website_url) DO UPDATE SET
          name = EXCLUDED.name, endpoint_config = EXCLUDED.endpoint_config,
-         rate_limit_rps = EXCLUDED.rate_limit_rps, enabled = EXCLUDED.enabled
+         rate_limit_rps = EXCLUDED.rate_limit_rps
        RETURNING id`,
       [s.platform, s.name, s.website_url, JSON.stringify(s.endpoint_config), s.rate_limit_rps, s.enabled],
     )
