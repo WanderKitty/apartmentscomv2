@@ -17,3 +17,21 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @aptv2/worker scrape:all
+
+  # Enrichment backfill (manual): re-extracts each source's latest snapshot
+  # with the Haiku enricher — fills summaries/concessions for listings that
+  # landed without them. Idempotent via extract_cache; auditable per-source
+  # scrape_runs rows. Run after wiring new sources or schema deepening.
+  reprocess:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @aptv2/worker reprocess
