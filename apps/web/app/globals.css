@@ -103,6 +103,26 @@ body {
   animation: shimmer 1.4s linear infinite;
 }
 
+/* Map pin: drop in and settle. */
+@keyframes pin-drop {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.pin-drop {
+  animation: pin-drop 450ms var(--ease-glide) both;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -116,7 +136,8 @@ body {
   .card-enter,
   .img-enter,
   .skeleton,
-  .spinner {
+  .spinner,
+  .pin-drop {
     animation: none;
   }
 }
