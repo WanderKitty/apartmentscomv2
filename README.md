@@ -12,6 +12,14 @@ Nominatim (OpenStreetMap) only when a candidate site's own markup has no
 coordinates, caching every result. Geocoding data © OpenStreetMap
 contributors — attributed in the site footer.
 
+## Architecture
+
+[![Eola System Map](docs/eola-system-map.png)](https://claude.ai/code/artifact/5fff7ffe-151e-4c0d-be7f-627b75d128ef)
+
+## Testing
+
+[![Eola Test Harness](docs/eola-test-harness.png)](https://claude.ai/code/artifact/15d4e935-1b3a-48a1-ac0c-992b22ffb1d5)
+
 ## Automation
 
 - **CI** (`.github/workflows/ci.yml`) — typecheck, every package's test suite
