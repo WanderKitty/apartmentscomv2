@@ -50,7 +50,14 @@ describe('sources seed', () => {
     await seedSources(pool)
     await pool.query(`UPDATE sources SET enabled = false WHERE name = 'Current Orlando'`)
     await seedSources(pool)
-    const { rows } = await pool.query(`SELECT enabled FROM sources WHERE name = 'Current Orlando'`)
-    expect(rows[0].enabled).toBe(false)
+    try {
+      const { rows } = await pool.query(`SELECT enabled FROM sources WHERE name = 'Current Orlando'`)
+      expect(rows[0].enabled).toBe(false)
+    } finally {
+      // This test DB is shared across the whole run (M8c) — restore the
+      // seed's own default so a later suite in the same run never inherits
+      // a disabled source left over from this test's assertion setup.
+      await pool.query(`UPDATE sources SET enabled = true WHERE name = 'Current Orlando'`)
+    }
   })
 })

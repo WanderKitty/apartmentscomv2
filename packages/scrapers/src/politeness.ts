@@ -30,6 +30,18 @@ export function sha256Json(value: unknown): string {
 
 export type FetchOpts = { maxRps?: number }
 
+/**
+ * Coerces a `sources.rate_limit_rps` value (a `numeric` column — pg returns
+ * it as a string) into a usable per-call `maxRps`. A non-finite or
+ * non-positive value (0, negative, NaN, garbage) falls back to `undefined`
+ * so the caller's default spacing applies, rather than silently disabling
+ * rate limiting (`1000 / -1` is a negative gap, which floors to zero delay).
+ */
+export function coerceMaxRps(value: unknown): number | undefined {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
 export type PoliteFetcher = {
   fetchJson(url: string, policy: RobotsPolicy | null, opts?: FetchOpts): Promise<{ status: number; body: unknown }>
   fetchText(url: string, policy: RobotsPolicy | null, opts?: FetchOpts): Promise<{ status: number; body: string }>
@@ -53,7 +65,10 @@ export function createPoliteFetcher(
   // spacing, UA, retry with backoff. Body handling is the only variance.
   async function politeRequest(url: string, policy: RobotsPolicy | null, opts?: FetchOpts): Promise<Response> {
     const u = new URL(url)
-    if (policy && !isPathAllowed(policy, u.pathname)) throw new RobotsDisallowedError(url)
+    // Google REP matches against path+query, not path alone — a wildcard
+    // rule like `Disallow: /*?s=` (see robots.ts's own tests) can only
+    // ever fire against a live request if the query string is included.
+    if (policy && !isPathAllowed(policy, u.pathname + u.search)) throw new RobotsDisallowedError(url)
     // A per-call maxRps (e.g. a source's own rate_limit_rps) overrides the
     // fetcher's default spacing for just this call; crawl-delay still wins
     // over either when it demands something slower.

@@ -70,9 +70,15 @@ function patternToRegex(pattern: string): RegExp {
  */
 export function isPathAllowed(policy: RobotsPolicy, path: string): boolean {
   type Match = { length: number; allow: boolean }
+  // `allow` is guarded at point of use: every `sources.robots_policy` row
+  // written before this task is JSONB with only {disallow,
+  // crawlDelaySeconds} — no data backfill, so a legacy row must not crash
+  // here (it would otherwise TypeError on every scrape until a fresh 200
+  // robots.txt refresh rewrites the stored policy).
+  const allowPatterns = policy.allow ?? []
   const matches: Match[] = [
     ...policy.disallow.filter((p) => patternToRegex(p).test(path)).map((p) => ({ length: p.length, allow: false })),
-    ...policy.allow.filter((p) => patternToRegex(p).test(path)).map((p) => ({ length: p.length, allow: true })),
+    ...allowPatterns.filter((p) => patternToRegex(p).test(path)).map((p) => ({ length: p.length, allow: true })),
   ]
   if (matches.length === 0) return true
   matches.sort((a, b) => b.length - a.length || (a.allow === b.allow ? 0 : a.allow ? -1 : 1))
