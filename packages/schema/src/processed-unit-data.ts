@@ -37,7 +37,7 @@ export const ProcessedUnitDataSchema = z.object({
   source_id: z
     .string()
     .regex(/^[a-z0-9_-]+___[A-Za-z0-9_-]+$/, "expected {platform}___{external_id}"),
-  platform: z.enum(["rentcafe", "appfolio", "entrata", "seed"]),
+  platform: z.enum(["rentcafe", "appfolio", "entrata", "spherexx", "seed"]),
   original_source_id: z.string().nullable().default(null), // cross-syndication origin
   collapse_key: z.string(),            // strict dedup: same unit, same source-of-truth
   liberal_dedup_cluster: z.string(),   // loose dedup: same physical unit across sources
