@@ -42,4 +42,7 @@ for (const source of sources) {
 }
 
 console.log(`[scrape-all] done: ${succeeded} ok, ${failed} failed, ${sources.length} total`)
-process.exit(succeeded === 0 && sources.length > 0 ? 1 : 0)
+// Tri-state exit for CI cron: Actions treats any nonzero as a red run — for
+// a 2-source demo, ANY source failure should alert, not just total failure.
+// 0 = all ok, 2 = some failed, 1 = all failed.
+process.exit(failed === 0 ? 0 : succeeded === 0 ? 1 : 2)
