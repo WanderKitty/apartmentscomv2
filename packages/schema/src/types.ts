@@ -99,7 +99,9 @@ export interface SearchResult {
     parseMs: number;
     searchMs: number;
     p50SearchMs: number;
-    corpus: number; // number of seeded listings searched
+    corpus: number; // total active listings searched (seed + scraped)
+    corpusSeed: number; // active listings with provenance = 'seed'
+    corpusScraped: number; // active listings with provenance = 'scraped'
   };
 }
 

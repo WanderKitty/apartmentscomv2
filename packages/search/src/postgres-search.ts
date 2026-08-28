@@ -66,6 +66,9 @@ FROM (
     AND ($7 = '' OR l.search_tsv @@ plainto_tsquery('english', $7))
 ) q
 ORDER BY (q.price_cents IS NULL) ASC, score_total DESC, q.source_platform, q.source_external_id
+-- Safety valve: pagination is future work; the returned page is what
+-- collapse operates on, so this bounds the collapse/render cost per request.
+LIMIT 500
 `
 
 const GET_LISTING_SQL = `
@@ -277,7 +280,11 @@ export function createSearchService(
           parsed.neighborhoods,
           parsed.residualText,
         ]),
-        pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM listings WHERE status = 'active'`),
+        pool.query<{ seed: number; scraped: number }>(
+          `SELECT count(*) FILTER (WHERE provenance = 'seed')::int AS seed,
+                  count(*) FILTER (WHERE provenance = 'scraped')::int AS scraped
+           FROM listings WHERE status = 'active'`,
+        ),
       ])
       const collapsed = collapseDuplicates(rows.map((r) => rowToListing(r, now)))
       const searchMs = Math.round((performance.now() - t0) * 100) / 100
@@ -301,7 +308,9 @@ export function createSearchService(
           parseMs: parsed.parseMs,
           searchMs,
           p50SearchMs: recordP50(searchMs),
-          corpus: corpusRes.rows[0]!.n,
+          corpus: corpusRes.rows[0]!.seed + corpusRes.rows[0]!.scraped,
+          corpusSeed: corpusRes.rows[0]!.seed,
+          corpusScraped: corpusRes.rows[0]!.scraped,
         },
       }
     },

@@ -1,4 +1,5 @@
-import { makeSources } from "@/lib/fixtures";
+import { getPool } from "@aptv2/db";
+import { getSourceHealth } from "@/lib/admin";
 import { relativeTime } from "@/lib/format";
 import type { SourceHealth } from "@/lib/types";
 
@@ -36,7 +37,7 @@ const HEALTH_LABEL: Record<Health, string> = {
 
 export default async function AdminPage() {
   const now = new Date();
-  const sources = makeSources(now);
+  const sources = await getSourceHealth(getPool());
   const active = sources.reduce((n, s) => n + s.activeListings, 0);
   const alerts = sources.filter((s) => health(s, now) === "failing").length;
 
